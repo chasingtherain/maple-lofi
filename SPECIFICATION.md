@@ -88,17 +88,22 @@ ellinia.mp3  # Duplicates allowed - this will play ellinia twice
 **Purpose**: Combine tracks into seamless longform audio
 
 **Behavior**:
-1. Resample all tracks to 48kHz, 16-bit PCM (if needed)
-2. Apply crossfade between consecutive tracks (default: 15s)
-3. **Short track handling**:
+1. **Normalize loudness** for each track:
+   - Target: -20 LUFS (standard streaming level)
+   - True Peak: -1.5 dBTP
+   - Loudness Range: 11 LU
+   - Ensures consistent volume across all tracks
+2. Resample all tracks to 48kHz, 16-bit PCM (if needed)
+3. Apply crossfade between consecutive tracks (default: 15s, configurable via `--fade-ms`)
+4. **Short track handling**:
    - If track duration < crossfade duration:
      - Reduce crossfade to 50% of track duration
      - Log the adjustment
    - Minimum effective crossfade: 1 second
-4. No hard cuts or dead air between tracks
-5. Output single merged file
+5. No hard cuts or dead air between tracks
+6. Output single merged file
 
-**Output**: `merged_clean.wav` (48kHz, 16-bit PCM)
+**Output**: `merged_clean.wav` (48kHz, 16-bit PCM, loudness-normalized)
 
 ---
 
@@ -293,6 +298,12 @@ python -m maple_lofi \
 - **Low-pass @ 11kHz**: Warm, muffled lofi character (mimics vinyl/tape)
 - **Texture gain**: -26dB (subtle ambient layer, not overpowering)
 - **Drums gain**: -22dB (present but not dominant)
+
+### **Loudness Normalization**
+- **Target**: -20 LUFS (standard streaming level for platforms like YouTube, Spotify)
+- **True Peak**: -1.5 dBTP (prevents clipping on all playback systems)
+- **Loudness Range**: 11 LU (preserves dynamics while ensuring consistency)
+- **Rationale**: Ensures consistent perceived volume across all tracks in the merge
 
 ### **Compression**
 - **Ratio 3:1**: Gentle compression, preserves dynamics
@@ -540,7 +551,7 @@ To maximize learning, the agent must generate the following documentation as par
 
 - ❌ No cloud services or streaming APIs
 - ❌ No web apps or UI frameworks
-- ❌ No overengineered loudness (LUFS out of scope for v1)
+- ❌ No per-segment loudness adjustments (simple per-track normalization is sufficient)
 - ❌ No monetization or copyright enforcement logic
 - ❌ No animated video (static image only for v1)
 - ❌ No real-time processing or streaming

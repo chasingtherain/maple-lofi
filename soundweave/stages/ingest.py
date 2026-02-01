@@ -4,10 +4,10 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from maple_lofi.config import PipelineConfig
-from maple_lofi.ffmpeg.probe import probe_audio_file
-from maple_lofi.utils.natural_sort import natural_sort
-from maple_lofi.utils.validators import ValidationError
+from soundweave.config import PipelineConfig
+from soundweave.ffmpeg.probe import probe_audio_file
+from soundweave.utils.natural_sort import natural_sort
+from soundweave.utils.validators import ValidationError
 
 
 # Supported audio file extensions

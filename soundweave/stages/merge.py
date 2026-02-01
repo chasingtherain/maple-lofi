@@ -3,10 +3,10 @@
 import logging
 from pathlib import Path
 
-from maple_lofi.config import PipelineConfig
-from maple_lofi.ffmpeg.commands import build_merge_command
-from maple_lofi.ffmpeg.executor import run_ffmpeg
-from maple_lofi.stages.ingest import AudioTrack
+from soundweave.config import PipelineConfig
+from soundweave.ffmpeg.commands import build_merge_command
+from soundweave.ffmpeg.executor import run_ffmpeg
+from soundweave.stages.ingest import AudioTrack
 
 
 def calculate_crossfade_durations(
@@ -112,7 +112,7 @@ def merge_stage(
 
     # Verify output
     if not output_path.exists():
-        from maple_lofi.ffmpeg.executor import ProcessingError
+        from soundweave.ffmpeg.executor import ProcessingError
         raise ProcessingError("merge: Output file not created")
 
     file_size_mb = output_path.stat().st_size / (1024 ** 2)

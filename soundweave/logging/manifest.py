@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from maple_lofi.config import PipelineConfig
+from soundweave.config import PipelineConfig
 
 
 @dataclass
@@ -105,7 +105,7 @@ class ManifestBuilder:
         # Try to get duration from probe if it's audio/video
         duration_s = None
         try:
-            from maple_lofi.ffmpeg.probe import probe_audio_file
+            from soundweave.ffmpeg.probe import probe_audio_file
             metadata = probe_audio_file(path)
             duration_s = round(metadata.duration_s, 2)
         except Exception:

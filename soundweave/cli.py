@@ -4,8 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from maple_lofi.config import PipelineConfig
-from maple_lofi.utils.validators import (
+from soundweave.config import PipelineConfig
+from soundweave.utils.validators import (
     ValidationError,
     estimate_disk_space_needed,
     validate_asset_path,
@@ -24,22 +24,22 @@ def parse_args() -> argparse.Namespace:
         Parsed arguments
     """
     parser = argparse.ArgumentParser(
-        prog="maple_lofi",
+        prog="soundweave",
         description="Random soundtrack selector and YouTube video generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Basic: Random 20 tracks with video
-  python -m maple_lofi --input input --output output --image cover.png
+  python -m soundweave --input input --output output --image cover.png
 
   # Select specific number of tracks
-  python -m maple_lofi --input input --output output --image cover.png --num-tracks 30
+  python -m soundweave --input input --output output --image cover.png --num-tracks 30
 
   # Just audio, no video
-  python -m maple_lofi --input input --output output
+  python -m soundweave --input input --output output
 
   # Custom crossfade duration
-  python -m maple_lofi --input input --output output --fade-ms 5000
+  python -m soundweave --input input --output output --fade-ms 5000
         """
     )
 
@@ -152,7 +152,7 @@ def main() -> int:
         run_preflight_checks(config)
 
         # Run the pipeline
-        from maple_lofi.pipeline import Pipeline
+        from soundweave.pipeline import Pipeline
         pipeline = Pipeline(config)
         return pipeline.run()
 

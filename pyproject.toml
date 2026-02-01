@@ -1,7 +1,7 @@
 [project]
-name = "maple-lofi"
+name = "soundweave"
 version = "0.1.0"
-description = "Local CLI pipeline for MapleStory BGM → lofi YouTube longplays"
+description = "Random soundtrack selector and YouTube video generator"
 requires-python = ">=3.10"
 dependencies = []
 
@@ -14,7 +14,7 @@ dev = [
 ]
 
 [project.scripts]
-maple-lofi = "maple_lofi.__main__:main"
+soundweave = "soundweave.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

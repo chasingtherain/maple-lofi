@@ -4,16 +4,16 @@ import logging
 import time
 from pathlib import Path
 
-from maple_lofi.config import PipelineConfig
-from maple_lofi.ffmpeg.commands import build_mp3_command
-from maple_lofi.ffmpeg.executor import ProcessingError, run_ffmpeg
-from maple_lofi.logging.logger import setup_logger
-from maple_lofi.logging.manifest import ManifestBuilder
-from maple_lofi.stages.ingest import ingest_stage
-from maple_lofi.stages.merge import merge_stage
-from maple_lofi.stages.video import video_stage
-from maple_lofi.utils.validators import ValidationError
-from maple_lofi.utils.youtube import write_youtube_description
+from soundweave.config import PipelineConfig
+from soundweave.ffmpeg.commands import build_mp3_command
+from soundweave.ffmpeg.executor import ProcessingError, run_ffmpeg
+from soundweave.logging.logger import setup_logger
+from soundweave.logging.manifest import ManifestBuilder
+from soundweave.stages.ingest import ingest_stage
+from soundweave.stages.merge import merge_stage
+from soundweave.stages.video import video_stage
+from soundweave.utils.validators import ValidationError
+from soundweave.utils.youtube import write_youtube_description
 
 
 class OutputError(Exception):
@@ -41,7 +41,7 @@ class Pipeline:
             Exit code (0=success, 1=validation error, 2=processing error, 3=output error)
         """
         self.logger.info("=" * 60)
-        self.logger.info("Maple Lofi - Random Track Selector & Video Generator")
+        self.logger.info("Soundweave - Random Track Selector & Video Generator")
         self.logger.info("=" * 60)
         self.logger.info(f"Run ID: {self.config.run_id}")
         self.logger.info(f"Timestamp: {self.config.timestamp}")

@@ -15,7 +15,7 @@ def setup_logger(log_file: Path) -> logging.Logger:
     Returns:
         Configured logger instance
     """
-    logger = logging.getLogger("maple_lofi")
+    logger = logging.getLogger("soundweave")
     logger.setLevel(logging.DEBUG)
 
     # Remove any existing handlers

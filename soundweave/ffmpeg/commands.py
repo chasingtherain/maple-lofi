@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from maple_lofi.stages.ingest import AudioTrack
+from soundweave.stages.ingest import AudioTrack
 
 
 def build_merge_command(

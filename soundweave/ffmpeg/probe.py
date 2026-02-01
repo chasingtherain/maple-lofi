@@ -5,7 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from maple_lofi.utils.validators import ValidationError
+from soundweave.utils.validators import ValidationError
 
 
 @dataclass

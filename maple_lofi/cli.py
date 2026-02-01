@@ -29,16 +29,24 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Minimal (audio only with lofi)
+  # Basic (EQ only - warm, natural)
   python -m maple_lofi --input input --output output
 
-  # Full (with video and custom assets)
+  # With subtle warmth (adds saturation)
+  python -m maple_lofi --input input --output output --enable-saturation
+
+  # Full lofi (EQ + saturation + gentle compression)
+  python -m maple_lofi --input input --output output \\
+    --enable-saturation --enable-compression
+
+  # With video and custom assets
   python -m maple_lofi \\
     --input input \\
     --output output \\
     --cover assets/cover.png \\
     --texture assets/rain.wav \\
-    --drums assets/drums.wav --drums-start 20
+    --drums assets/drums.wav --drums-start 20 \\
+    --enable-saturation
 
   # Skip lofi (just merge tracks)
   python -m maple_lofi --input input --output output --skip-lofi
@@ -112,8 +120,46 @@ Examples:
     parser.add_argument(
         "--lowpass",
         type=int,
-        default=11000,
-        help="Low-pass filter frequency in Hz (default: 11000)"
+        default=9500,
+        help="Low-pass filter frequency in Hz (default: 9500 for warmth)"
+    )
+
+    # Lofi processing options
+    parser.add_argument(
+        "--enable-compression",
+        action="store_true",
+        help="Enable gentle compression (off by default, restraint > layers)"
+    )
+    parser.add_argument(
+        "--enable-saturation",
+        action="store_true",
+        help="Enable subtle saturation for warmth (off by default)"
+    )
+
+    # Advanced compression tuning (for power users)
+    parser.add_argument(
+        "--comp-ratio",
+        type=float,
+        default=2.0,
+        help="Compression ratio (default: 2.0)"
+    )
+    parser.add_argument(
+        "--comp-threshold",
+        type=float,
+        default=-23.0,
+        help="Compression threshold in dB (default: -23.0)"
+    )
+    parser.add_argument(
+        "--comp-attack",
+        type=float,
+        default=25.0,
+        help="Compression attack in ms (default: 25.0)"
+    )
+    parser.add_argument(
+        "--comp-release",
+        type=float,
+        default=200.0,
+        help="Compression release in ms (default: 200.0)"
     )
 
     # Flags
@@ -147,6 +193,12 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         texture_gain_db=args.texture_gain,
         drums_gain_db=args.drums_gain,
         drums_start_s=args.drums_start,
+        enable_compression=args.enable_compression,
+        enable_saturation=args.enable_saturation,
+        comp_ratio=args.comp_ratio,
+        comp_threshold_db=args.comp_threshold,
+        comp_attack_ms=args.comp_attack,
+        comp_release_ms=args.comp_release,
         skip_lofi=args.skip_lofi,
     )
 

@@ -114,13 +114,15 @@ def build_lofi_command(
     Returns:
         Tuple of (wav_command, mp3_command)
 
-    Processing chain:
+    Processing chain (production-grade, taste-driven):
         1. Optional: Loop and mix texture at texture_gain_db
         2. Optional: Loop and mix drums (delayed) at drums_gain_db
-        3. Highpass filter @ highpass_hz
-        4. Lowpass filter @ lowpass_hz
-        5. Compressor (3:1, -18dB threshold)
-        6. Limiter @ -1dB
+        3. Gentle EQ: Highpass @ highpass_hz, Lowpass @ lowpass_hz
+        4. Optional: Subtle saturation (warmth, not distortion)
+        5. Optional: Light compression (slow, transparent)
+        6. Limiter @ -1dB (safety only, should rarely trigger)
+
+    Philosophy: Restraint > layers. Default (no saturation/compression) = warm, natural.
     """
     # Build complex filter chain
     filter_parts = []
@@ -168,18 +170,35 @@ def build_lofi_command(
     else:
         current_stream = "[0:a]"
 
-    # Apply EQ and dynamics
+    # Apply EQ (highpass → lowpass)
     filter_parts.append(f"{current_stream}highpass=f={config.highpass_hz}[hp]")
     filter_parts.append(f"[hp]lowpass=f={config.lowpass_hz}[lp]")
 
-    # Compression: ratio 3:1, threshold -18dB, attack 5ms, release 50ms
-    # Note: makeup gain is automatic when not specified
-    filter_parts.append(
-        "[lp]acompressor=ratio=3:threshold=-18dB:attack=5:release=50[comp]"
-    )
+    current_stream = "[lp]"
 
-    # Limiter at -1dB
-    filter_parts.append("[comp]alimiter=limit=-1dB:attack=5:release=50[out]")
+    # Apply saturation (optional - adds warmth)
+    if config.enable_saturation:
+        # Use asubboost for subtle harmonic warmth in low-mids
+        # dry=0.7, wet=0.3 means 70% original, 30% effect (subtle)
+        filter_parts.append(
+            f"{current_stream}asubboost=dry=0.7:wet=0.3:boost=2:decay=0.7:feedback=0.5:cutoff=100[sat]"
+        )
+        current_stream = "[sat]"
+
+    # Apply compression (optional - gentle, transparent)
+    if config.enable_compression:
+        # Slow attack/release preserves transients and avoids pumping
+        filter_parts.append(
+            f"{current_stream}acompressor="
+            f"ratio={config.comp_ratio}:"
+            f"threshold={config.comp_threshold_db}dB:"
+            f"attack={config.comp_attack_ms}:"
+            f"release={config.comp_release_ms}[comp]"
+        )
+        current_stream = "[comp]"
+
+    # Apply limiter (always on - safety only, should rarely trigger)
+    filter_parts.append(f"{current_stream}alimiter=limit=-1dB:attack=5:release=50[out]")
 
     filter_complex = ";".join(filter_parts)
 

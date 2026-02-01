@@ -23,14 +23,16 @@ def lofi_stage(
     Returns:
         Path to merged_lofi.wav
 
-    Process:
+    Process (production-grade, taste-driven):
         1. Optional: Loop and mix texture at texture_gain_db
         2. Optional: Loop and mix drums (with delay) at drums_gain_db
-        3. Apply highpass @ highpass_hz
-        4. Apply lowpass @ lowpass_hz
-        5. Apply compression (3:1, -18dB threshold)
-        6. Apply limiter @ -1dB
+        3. Apply EQ: highpass @ highpass_hz, lowpass @ lowpass_hz
+        4. Optional: Apply subtle saturation (warmth, not distortion)
+        5. Optional: Apply gentle compression (slow, transparent)
+        6. Apply limiter @ -1dB (safety only, should rarely trigger)
         7. Encode to MP3 (320kbps CBR)
+
+    Philosophy: Restraint > layers. Default (no saturation/compression) = warm, natural.
 
     Output files:
         - merged_lofi.wav (48kHz, 16-bit PCM)
@@ -58,8 +60,24 @@ def lofi_stage(
 
     logger.info(f"Highpass: {config.highpass_hz}Hz")
     logger.info(f"Lowpass: {config.lowpass_hz}Hz")
-    logger.info("Compression: 3:1 ratio, -18dB threshold")
-    logger.info("Limiter: -1dB")
+
+    # Log optional saturation
+    if config.enable_saturation:
+        logger.info("Saturation: Enabled (subtle warmth)")
+    else:
+        logger.info("Saturation: Disabled")
+
+    # Log optional compression
+    if config.enable_compression:
+        logger.info(
+            f"Compression: Enabled ({config.comp_ratio}:1 ratio, "
+            f"{config.comp_threshold_db}dB threshold, "
+            f"{config.comp_attack_ms}ms attack, {config.comp_release_ms}ms release)"
+        )
+    else:
+        logger.info("Compression: Disabled")
+
+    logger.info("Limiter: -1dB (safety)")
 
     # Build commands
     wav_cmd, mp3_cmd = build_lofi_command(

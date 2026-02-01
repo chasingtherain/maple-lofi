@@ -26,10 +26,20 @@ class PipelineConfig:
     # Audio processing parameters
     fade_ms: int = 15000                # Crossfade duration in milliseconds
     highpass_hz: int = 35               # High-pass filter frequency
-    lowpass_hz: int = 11000             # Low-pass filter frequency
+    lowpass_hz: int = 9500              # Low-pass filter frequency (changed from 11000 for warmth)
     texture_gain_db: float = -26.0      # Texture volume in dB
     drums_gain_db: float = -22.0        # Drums volume in dB
     drums_start_s: float = 0.0          # Drums start delay in seconds
+
+    # Lofi processing options (optional, off by default)
+    enable_compression: bool = False    # Enable gentle compression (restraint > layers)
+    enable_saturation: bool = False     # Enable subtle saturation for warmth
+
+    # Compression parameters (when enabled)
+    comp_ratio: float = 2.0             # Compression ratio (gentler than old 3:1)
+    comp_threshold_db: float = -23.0    # Threshold in dB (lower than old -18dB)
+    comp_attack_ms: float = 25.0        # Attack time in ms (slower than old 5ms)
+    comp_release_ms: float = 200.0      # Release time in ms (longer than old 50ms)
 
     # Flags
     skip_lofi: bool = False             # Skip lofi transformation stage

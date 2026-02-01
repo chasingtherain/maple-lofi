@@ -151,23 +151,19 @@ def build_lofi_command(
 
     # Mix all inputs if we have texture/drums
     if len(input_labels) > 1:
-        # Build amix with volume adjustments
-        mix_inputs = []
-        for i, label in enumerate(input_labels):
-            if i == 0:
-                # Main audio at 0dB (unity gain)
-                mix_inputs.append(f"[{label}]")
-            elif "texture" in label:
-                mix_inputs.append(f"[{label}]volume={config.texture_gain_db}dB[texture_vol]")
-                filter_parts[-len(input_labels) + i] += f";{mix_inputs[-1]}"
-                mix_inputs[-1] = "[texture_vol]"
-            elif "drums" in label:
-                mix_inputs.append(f"[{label}]volume={config.drums_gain_db}dB[drums_vol]")
-                filter_parts[-1] += f";{mix_inputs[-1]}"
-                mix_inputs[-1] = "[drums_vol]"
+        # Apply volume to texture/drums
+        mix_inputs = ["[0:a]"]  # Main audio at unity gain
+
+        if "texture" in input_labels:
+            filter_parts.append(f"[texture]volume={config.texture_gain_db}dB[texture_vol]")
+            mix_inputs.append("[texture_vol]")
+
+        if "drums" in input_labels:
+            filter_parts.append(f"[drums]volume={config.drums_gain_db}dB[drums_vol]")
+            mix_inputs.append("[drums_vol]")
 
         # Mix all streams
-        filter_parts.append(f"{''.join(input_labels)}amix=inputs={len(input_labels)}:normalize=0[mixed]")
+        filter_parts.append(f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:normalize=0[mixed]")
         current_stream = "[mixed]"
     else:
         current_stream = "[0:a]"

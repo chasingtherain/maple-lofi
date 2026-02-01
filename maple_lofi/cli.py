@@ -126,6 +126,12 @@ Examples:
 
     # Lofi processing options
     parser.add_argument(
+        "--tempo",
+        type=float,
+        default=0.75,
+        help="Playback speed factor (default: 0.75 for café chill vibe, 1.0 = original speed)"
+    )
+    parser.add_argument(
         "--enable-compression",
         action="store_true",
         help="Enable gentle compression (off by default, restraint > layers)"
@@ -134,6 +140,11 @@ Examples:
         "--enable-saturation",
         action="store_true",
         help="Enable subtle saturation for warmth (off by default)"
+    )
+    parser.add_argument(
+        "--no-reverb",
+        action="store_true",
+        help="Disable reverb (reverb is ON by default for café ambience)"
     )
 
     # Advanced compression tuning (for power users)
@@ -193,8 +204,10 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         texture_gain_db=args.texture_gain,
         drums_gain_db=args.drums_gain,
         drums_start_s=args.drums_start,
+        tempo_factor=args.tempo,
         enable_compression=args.enable_compression,
         enable_saturation=args.enable_saturation,
+        enable_reverb=not args.no_reverb,  # Reverb ON by default unless --no-reverb
         comp_ratio=args.comp_ratio,
         comp_threshold_db=args.comp_threshold,
         comp_attack_ms=args.comp_attack,

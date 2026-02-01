@@ -34,6 +34,10 @@ class PipelineConfig:
     # Lofi processing options (optional, off by default)
     enable_compression: bool = False    # Enable gentle compression (restraint > layers)
     enable_saturation: bool = False     # Enable subtle saturation for warmth
+    enable_reverb: bool = True          # Enable subtle reverb for café ambience (on by default)
+
+    # Tempo control (café vibe)
+    tempo_factor: float = 0.75          # Playback speed (0.75 = 25% slower, café chill vibe)
 
     # Compression parameters (when enabled)
     comp_ratio: float = 2.0             # Compression ratio (gentler than old 3:1)

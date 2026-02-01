@@ -58,8 +58,21 @@ def lofi_stage(
     else:
         logger.info("Drums: None")
 
+    # Log tempo control
+    if config.tempo_factor != 1.0:
+        speed_pct = int((1.0 - config.tempo_factor) * 100)
+        logger.info(f"Tempo: {config.tempo_factor:.2f}x speed ({speed_pct}% slower, café vibe)")
+    else:
+        logger.info("Tempo: 1.0x (original speed)")
+
     logger.info(f"Highpass: {config.highpass_hz}Hz")
     logger.info(f"Lowpass: {config.lowpass_hz}Hz")
+
+    # Log reverb
+    if config.enable_reverb:
+        logger.info("Reverb: Enabled (café ambience)")
+    else:
+        logger.info("Reverb: Disabled")
 
     # Log optional saturation
     if config.enable_saturation:

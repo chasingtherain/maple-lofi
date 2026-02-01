@@ -117,12 +117,14 @@ def build_lofi_command(
     Processing chain (production-grade, taste-driven):
         1. Optional: Loop and mix texture at texture_gain_db
         2. Optional: Loop and mix drums (delayed) at drums_gain_db
-        3. Gentle EQ: Highpass @ highpass_hz, Lowpass @ lowpass_hz
-        4. Optional: Subtle saturation (warmth, not distortion)
-        5. Optional: Light compression (slow, transparent)
-        6. Limiter @ -1dB (safety only, should rarely trigger)
+        3. Optional: Tempo slowdown (0.75x by default for café vibe, pitch preserved)
+        4. Gentle EQ: Highpass @ highpass_hz, Lowpass @ lowpass_hz
+        5. Optional: Reverb (café ambience, ON by default)
+        6. Optional: Subtle saturation (warmth, not distortion)
+        7. Optional: Light compression (slow, transparent)
+        8. Limiter @ -1dB (safety only, should rarely trigger)
 
-    Philosophy: Restraint > layers. Default (no saturation/compression) = warm, natural.
+    Philosophy: Restraint > layers. Default (reverb + tempo) creates café vibe.
     """
     # Build complex filter chain
     filter_parts = []
@@ -170,18 +172,47 @@ def build_lofi_command(
     else:
         current_stream = "[0:a]"
 
+    # Apply tempo change (slow down for café vibe)
+    # atempo preserves pitch while changing speed
+    # Limitation: each atempo can only do 0.5x-2.0x, chain multiple if needed
+    if config.tempo_factor != 1.0:
+        tempo = config.tempo_factor
+        # Build atempo filter chain (each filter can only do 0.5x-2.0x)
+        while tempo < 0.5:
+            filter_parts.append(f"{current_stream}atempo=0.5[tempo_intermediate]")
+            current_stream = "[tempo_intermediate]"
+            tempo /= 0.5
+        while tempo > 2.0:
+            filter_parts.append(f"{current_stream}atempo=2.0[tempo_intermediate]")
+            current_stream = "[tempo_intermediate]"
+            tempo /= 2.0
+        if tempo != 1.0:
+            filter_parts.append(f"{current_stream}atempo={tempo:.3f}[tempo]")
+            current_stream = "[tempo]"
+
     # Apply EQ (highpass → lowpass)
     filter_parts.append(f"{current_stream}highpass=f={config.highpass_hz}[hp]")
     filter_parts.append(f"[hp]lowpass=f={config.lowpass_hz}[lp]")
 
     current_stream = "[lp]"
 
+    # Apply reverb (café ambience - subtle room sound)
+    if config.enable_reverb:
+        # aecho creates subtle reverb/room ambience
+        # in_gain=0.8, out_gain=0.88: mostly original signal
+        # delays=60|120, decays=0.3|0.25: short room reflections
+        filter_parts.append(
+            f"{current_stream}aecho=in_gain=0.8:out_gain=0.88:delays=60|120:decays=0.3|0.25[reverb]"
+        )
+        current_stream = "[reverb]"
+
     # Apply saturation (optional - adds warmth)
     if config.enable_saturation:
-        # Use asubboost for subtle harmonic warmth in low-mids
-        # dry=0.7, wet=0.3 means 70% original, 30% effect (subtle)
+        # Use asubboost for harmonic warmth in low-mids
+        # dry=0.5, wet=0.5 means 50/50 mix (more obvious for testing)
+        # Adjust dry/wet ratio based on taste after testing
         filter_parts.append(
-            f"{current_stream}asubboost=dry=0.7:wet=0.3:boost=2:decay=0.7:feedback=0.5:cutoff=100[sat]"
+            f"{current_stream}asubboost=dry=0.5:wet=0.5:boost=3:decay=0.6:feedback=0.6:cutoff=150[sat]"
         )
         current_stream = "[sat]"
 

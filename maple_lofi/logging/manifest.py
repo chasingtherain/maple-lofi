@@ -55,12 +55,7 @@ class ManifestBuilder:
         """Build parameters dict from config."""
         return {
             "fade_ms": self.config.fade_ms,
-            "highpass_hz": self.config.highpass_hz,
-            "lowpass_hz": self.config.lowpass_hz,
-            "texture_gain_db": self.config.texture_gain_db,
-            "drums_gain_db": self.config.drums_gain_db,
-            "drums_start_s": self.config.drums_start_s,
-            "skip_lofi": self.config.skip_lofi
+            "num_tracks": self.config.num_tracks
         }
 
     def add_input_tracks(self, tracks: list, order_source: str):

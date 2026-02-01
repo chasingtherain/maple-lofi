@@ -61,15 +61,20 @@ def parse_order_file(order_file: Path) -> list[str]:
         order_file: Path to order.txt
 
     Returns:
-        List of filenames in order (may include duplicates)
+        List of filenames (may include duplicates)
 
     Format:
         - One filename per line (with extension)
         - Lines starting with # are ignored (comments)
         - Blank lines are ignored
         - Duplicates allowed (will be processed twice)
+
+    Examples:
+        track1.mp3
+        track2.mp3
+        track3.mp3
     """
-    ordered_filenames = []
+    ordered_tracks = []
 
     with open(order_file, "r", encoding="utf-8") as f:
         for line_num, line in enumerate(f, start=1):
@@ -80,16 +85,19 @@ def parse_order_file(order_file: Path) -> list[str]:
             if not line or line.startswith("#"):
                 continue
 
+            # Split on whitespace to get filename only
+            filename = line.split()[0]
+
             # Just the filename, no paths
-            if "/" in line or "\\" in line:
+            if "/" in filename or "\\" in filename:
                 raise ValidationError(
                     f"order.txt line {line_num}: Paths not allowed, "
-                    f"only filenames (got: {line})"
+                    f"only filenames (got: {filename})"
                 )
 
-            ordered_filenames.append(line)
+            ordered_tracks.append(filename)
 
-    return ordered_filenames
+    return ordered_tracks
 
 
 def validate_ordering(
@@ -155,7 +163,7 @@ def determine_track_order(
         logger: Logger for info/warnings
 
     Returns:
-        Ordered list of filenames (may include duplicates if order.txt has them)
+        Ordered list of filenames
 
     Logic:
         1. If order.txt exists: use it (and validate)
@@ -207,7 +215,7 @@ def ingest_stage(config: PipelineConfig, logger: logging.Logger) -> list[AudioTr
         logger: Logger instance
 
     Returns:
-        Ordered list of AudioTrack objects
+        Ordered list of AudioTrack objects (randomly selected if num_tracks specified)
 
     Raises:
         ValidationError: If zero valid files found after filtering
@@ -215,10 +223,13 @@ def ingest_stage(config: PipelineConfig, logger: logging.Logger) -> list[AudioTr
     Process:
         1. Scan input directory for audio files (top-level only)
         2. Determine ordering (order.txt or natural sort)
-        3. Probe each file for metadata
-        4. Filter out corrupted files (with warnings)
-        5. Return ordered list
+        3. Randomly select num_tracks if specified
+        4. Probe each file for metadata
+        5. Filter out corrupted files (with warnings)
+        6. Return ordered list
     """
+    import random
+
     logger.info("=== Stage 1: Ingest ===")
     logger.info(f"Scanning {config.input_dir} for audio files...")
 
@@ -228,7 +239,13 @@ def ingest_stage(config: PipelineConfig, logger: logging.Logger) -> list[AudioTr
 
     # Determine order
     ordered_filenames = determine_track_order(config.input_dir, audio_files, logger)
-    logger.info(f"Track order determined: {len(ordered_filenames)} track(s) to process")
+    logger.info(f"Track order determined: {len(ordered_filenames)} track(s) available")
+
+    # Randomly select num_tracks if specified and fewer than available
+    if config.num_tracks and config.num_tracks < len(ordered_filenames):
+        logger.info(f"Randomly selecting {config.num_tracks} track(s) from {len(ordered_filenames)} available")
+        ordered_filenames = random.sample(ordered_filenames, config.num_tracks)
+        logger.info(f"Selected {len(ordered_filenames)} track(s) for processing")
 
     # Build filename → path mapping
     file_map = {f.name: f for f in audio_files}

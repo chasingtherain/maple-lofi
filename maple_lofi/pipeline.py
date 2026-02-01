@@ -5,14 +5,15 @@ import time
 from pathlib import Path
 
 from maple_lofi.config import PipelineConfig
-from maple_lofi.ffmpeg.executor import ProcessingError
+from maple_lofi.ffmpeg.commands import build_mp3_command
+from maple_lofi.ffmpeg.executor import ProcessingError, run_ffmpeg
 from maple_lofi.logging.logger import setup_logger
 from maple_lofi.logging.manifest import ManifestBuilder
 from maple_lofi.stages.ingest import ingest_stage
-from maple_lofi.stages.lofi import lofi_stage
 from maple_lofi.stages.merge import merge_stage
 from maple_lofi.stages.video import video_stage
 from maple_lofi.utils.validators import ValidationError
+from maple_lofi.utils.youtube import write_youtube_description
 
 
 class OutputError(Exception):
@@ -40,7 +41,7 @@ class Pipeline:
             Exit code (0=success, 1=validation error, 2=processing error, 3=output error)
         """
         self.logger.info("=" * 60)
-        self.logger.info("Maple Lofi Pipeline")
+        self.logger.info("Maple Lofi - Random Track Selector & Video Generator")
         self.logger.info("=" * 60)
         self.logger.info(f"Run ID: {self.config.run_id}")
         self.logger.info(f"Timestamp: {self.config.timestamp}")
@@ -55,11 +56,9 @@ class Pipeline:
             # Add to manifest
             self.manifest.add_input_tracks(
                 tracks,
-                order_source="order.txt" if (self.config.input_dir / "order.txt").exists() else "natural_sort"
+                order_source="order.txt" if (self.config.input_dir / "order.txt").exists() else "random_selection"
             )
-            self.manifest.add_input_asset("cover_image", self.config.cover_image)
-            self.manifest.add_input_asset("texture", self.config.texture)
-            self.manifest.add_input_asset("drums", self.config.drums)
+            self.manifest.add_input_asset("static_image", self.config.static_image)
             self.manifest.add_stage_result(
                 "ingest",
                 "success",
@@ -84,42 +83,62 @@ class Pipeline:
 
             self.logger.info("")
 
-            # Stage 3: Lofi (optional)
-            if not self.config.skip_lofi:
-                start_time = time.time()
-                merged_lofi = lofi_stage(merged_clean, self.config, self.logger)
-                lofi_duration = time.time() - start_time
+            # Stage 3: MP3 Encoding & Timestamps
+            self.logger.info("=== Stage 3: MP3 Encoding & YouTube Timestamps ===")
+            start_time = time.time()
 
-                self.manifest.add_output("merged_lofi_wav", merged_lofi)
-                self.manifest.add_output("merged_lofi_mp3", self.config.output_dir / "merged_lofi.mp3")
-                self.manifest.add_stage_result(
-                    "lofi",
-                    "success",
-                    lofi_duration
-                )
+            # Encode to MP3
+            merged_mp3 = self.config.output_dir / "merged.mp3"
+            mp3_cmd = build_mp3_command(merged_clean, merged_mp3)
 
-                final_audio = merged_lofi
-            else:
-                self.logger.info("=== Stage 3: Lofi Transformation ===")
-                self.logger.info("Skipping lofi stage (--skip-lofi)")
-                self.manifest.add_stage_result(
-                    "lofi",
-                    "skipped",
-                    0.0
-                )
-                final_audio = merged_clean
+            self.logger.info("Encoding to MP3 (320kbps)...")
+            run_ffmpeg(
+                mp3_cmd,
+                self.logger,
+                description="MP3 encoding (320kbps CBR)",
+                timeout=None
+            )
+
+            mp3_size_mb = merged_mp3.stat().st_size / (1024 ** 2)
+            self.logger.info(f"  ✓ {merged_mp3.name} ({mp3_size_mb:.1f}MB)")
+
+            # Generate YouTube timestamps
+            crossfade_s = self.config.fade_ms / 1000.0
+            timestamps_path = self.config.output_dir / "youtube_description.txt"
+
+            self.logger.info("Generating YouTube timestamps...")
+            write_youtube_description(
+                timestamps_path,
+                tracks,
+                crossfade_s,
+                title="Tracklist"
+            )
+            self.logger.info(f"  ✓ {timestamps_path.name}")
+
+            encoding_duration = time.time() - start_time
+
+            self.manifest.add_output("merged_wav", merged_clean)
+            self.manifest.add_output("merged_mp3", merged_mp3)
+            self.manifest.add_output("youtube_description", timestamps_path)
+            self.manifest.add_stage_result(
+                "encoding",
+                "success",
+                encoding_duration
+            )
+
+            final_audio = merged_clean
 
             self.logger.info("")
 
             # Stage 4: Video (optional)
-            if self.config.cover_image:
+            if self.config.static_image:
                 start_time = time.time()
                 final_video = video_stage(final_audio, self.config, self.logger)
                 video_duration = time.time() - start_time
 
                 if final_video:
                     self.manifest.add_output("final_video", final_video)
-                    thumbnail_ext = self.config.cover_image.suffix
+                    thumbnail_ext = self.config.static_image.suffix
                     thumbnail_path = self.config.output_dir / f"thumbnail{thumbnail_ext}"
                     self.manifest.add_output("thumbnail", thumbnail_path)
 
@@ -130,7 +149,7 @@ class Pipeline:
                 )
             else:
                 self.logger.info("=== Stage 4: Video Rendering ===")
-                self.logger.info("No cover image specified, skipping video rendering")
+                self.logger.info("No static image specified, skipping video rendering")
                 self.manifest.add_stage_result(
                     "video",
                     "skipped",

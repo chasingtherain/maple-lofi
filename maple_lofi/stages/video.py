@@ -15,10 +15,10 @@ def video_stage(
     config: PipelineConfig,
     logger: logging.Logger
 ) -> Path:
-    """Stage 4: Render static video with cover image.
+    """Stage 4: Render static video with static image.
 
     Args:
-        audio_path: Path to final audio (merged_lofi.wav)
+        audio_path: Path to final audio (merged.wav)
         config: Pipeline configuration
         logger: Logger instance
 
@@ -27,12 +27,12 @@ def video_stage(
 
     Process:
         1. Probe audio duration
-        2. Scale/pad cover image to 1920x1080 (preserve aspect, letterbox)
+        2. Scale/pad static image to 1920x1080 (preserve aspect, letterbox)
         3. Render static video:
            - 1fps (minimal file size)
            - H.264 (yuv420p, high profile)
            - AAC audio (192kbps)
-        4. Copy cover image to output/thumbnail.{png,jpg}
+        4. Copy static image to output/thumbnail.{png,jpg}
 
     Output format:
         - 1920x1080, 1fps
@@ -41,11 +41,11 @@ def video_stage(
     """
     logger.info("=== Stage 4: Video Rendering ===")
 
-    if not config.cover_image:
-        logger.info("No cover image specified, skipping video rendering")
+    if not config.static_image:
+        logger.info("No static image specified, skipping video rendering")
         return None
 
-    logger.info(f"Cover image: {config.cover_image.name}")
+    logger.info(f"Static image: {config.static_image.name}")
 
     # Probe audio to get duration
     logger.info("Probing audio duration...")
@@ -59,7 +59,7 @@ def video_stage(
     # Build FFmpeg command
     command = build_video_command(
         audio_path,
-        config.cover_image,
+        config.static_image,
         output_path,
         duration_s
     )
@@ -76,12 +76,12 @@ def video_stage(
     video_size_mb = output_path.stat().st_size / (1024 ** 2)
     logger.info(f"  ✓ {output_path.name} ({video_size_mb:.1f}MB)")
 
-    # Copy cover image to output as thumbnail
-    thumbnail_ext = config.cover_image.suffix  # .png or .jpg
+    # Copy static image to output as thumbnail
+    thumbnail_ext = config.static_image.suffix  # .png or .jpg
     thumbnail_path = config.output_dir / f"thumbnail{thumbnail_ext}"
 
-    logger.info(f"Copying cover image to {thumbnail_path.name}...")
-    shutil.copy2(config.cover_image, thumbnail_path)
+    logger.info(f"Copying static image to {thumbnail_path.name}...")
+    shutil.copy2(config.static_image, thumbnail_path)
 
     logger.info("Video rendering complete")
 

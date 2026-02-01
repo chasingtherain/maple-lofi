@@ -25,31 +25,21 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         prog="maple_lofi",
-        description="MapleStory BGM → lofi YouTube longplay pipeline",
+        description="Random soundtrack selector and YouTube video generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic (EQ only - warm, natural)
+  # Basic: Random 20 tracks with video
+  python -m maple_lofi --input input --output output --image cover.png
+
+  # Select specific number of tracks
+  python -m maple_lofi --input input --output output --image cover.png --num-tracks 30
+
+  # Just audio, no video
   python -m maple_lofi --input input --output output
 
-  # With subtle warmth (adds saturation)
-  python -m maple_lofi --input input --output output --enable-saturation
-
-  # Full lofi (EQ + saturation + gentle compression)
-  python -m maple_lofi --input input --output output \\
-    --enable-saturation --enable-compression
-
-  # With video and custom assets
-  python -m maple_lofi \\
-    --input input \\
-    --output output \\
-    --cover assets/cover.png \\
-    --texture assets/rain.wav \\
-    --drums assets/drums.wav --drums-start 20 \\
-    --enable-saturation
-
-  # Skip lofi (just merge tracks)
-  python -m maple_lofi --input input --output output --skip-lofi
+  # Custom crossfade duration
+  python -m maple_lofi --input input --output output --fade-ms 5000
         """
     )
 
@@ -69,115 +59,23 @@ Examples:
 
     # Optional: Video
     parser.add_argument(
-        "--cover",
+        "--image",
         type=Path,
-        help="Cover image for video (omit to skip video rendering)"
+        help="Static image for video (omit to skip video rendering)"
     )
 
-    # Optional: Lofi assets
-    parser.add_argument(
-        "--texture",
-        type=Path,
-        help="Ambient texture audio file (e.g., rain.wav)"
-    )
-    parser.add_argument(
-        "--texture-gain",
-        type=float,
-        default=-26.0,
-        help="Texture volume in dB (default: -26)"
-    )
-    parser.add_argument(
-        "--drums",
-        type=Path,
-        help="Drum loop audio file"
-    )
-    parser.add_argument(
-        "--drums-gain",
-        type=float,
-        default=-22.0,
-        help="Drums volume in dB (default: -22)"
-    )
-    parser.add_argument(
-        "--drums-start",
-        type=float,
-        default=0.0,
-        help="Drums start delay in seconds (default: 0)"
-    )
-
-    # Optional: Audio processing
+    # Audio processing
     parser.add_argument(
         "--fade-ms",
         type=int,
-        default=15000,
-        help="Crossfade duration in milliseconds (default: 15000)"
+        default=3000,
+        help="Crossfade duration in milliseconds (default: 3000 = 3 seconds)"
     )
     parser.add_argument(
-        "--highpass",
+        "--num-tracks",
         type=int,
-        default=35,
-        help="High-pass filter frequency in Hz (default: 35)"
-    )
-    parser.add_argument(
-        "--lowpass",
-        type=int,
-        default=9500,
-        help="Low-pass filter frequency in Hz (default: 9500 for warmth)"
-    )
-
-    # Lofi processing options
-    parser.add_argument(
-        "--tempo",
-        type=float,
-        default=0.75,
-        help="Playback speed factor (default: 0.75 for café chill vibe, 1.0 = original speed)"
-    )
-    parser.add_argument(
-        "--enable-compression",
-        action="store_true",
-        help="Enable gentle compression (off by default, restraint > layers)"
-    )
-    parser.add_argument(
-        "--enable-saturation",
-        action="store_true",
-        help="Enable subtle saturation for warmth (off by default)"
-    )
-    parser.add_argument(
-        "--no-reverb",
-        action="store_true",
-        help="Disable reverb (reverb is ON by default for café ambience)"
-    )
-
-    # Advanced compression tuning (for power users)
-    parser.add_argument(
-        "--comp-ratio",
-        type=float,
-        default=2.0,
-        help="Compression ratio (default: 2.0)"
-    )
-    parser.add_argument(
-        "--comp-threshold",
-        type=float,
-        default=-23.0,
-        help="Compression threshold in dB (default: -23.0)"
-    )
-    parser.add_argument(
-        "--comp-attack",
-        type=float,
-        default=25.0,
-        help="Compression attack in ms (default: 25.0)"
-    )
-    parser.add_argument(
-        "--comp-release",
-        type=float,
-        default=200.0,
-        help="Compression release in ms (default: 200.0)"
-    )
-
-    # Flags
-    parser.add_argument(
-        "--skip-lofi",
-        action="store_true",
-        help="Skip lofi transformation stage entirely"
+        default=20,
+        help="Number of random tracks to select (default: 20)"
     )
 
     return parser.parse_args()
@@ -195,24 +93,9 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     return PipelineConfig(
         input_dir=args.input,
         output_dir=args.output,
-        cover_image=args.cover,
-        texture=args.texture,
-        drums=args.drums,
+        static_image=args.image,
         fade_ms=args.fade_ms,
-        highpass_hz=args.highpass,
-        lowpass_hz=args.lowpass,
-        texture_gain_db=args.texture_gain,
-        drums_gain_db=args.drums_gain,
-        drums_start_s=args.drums_start,
-        tempo_factor=args.tempo,
-        enable_compression=args.enable_compression,
-        enable_saturation=args.enable_saturation,
-        enable_reverb=not args.no_reverb,  # Reverb ON by default unless --no-reverb
-        comp_ratio=args.comp_ratio,
-        comp_threshold_db=args.comp_threshold,
-        comp_attack_ms=args.comp_attack,
-        comp_release_ms=args.comp_release,
-        skip_lofi=args.skip_lofi,
+        num_tracks=args.num_tracks,
     )
 
 
@@ -244,17 +127,9 @@ def run_preflight_checks(config: PipelineConfig) -> None:
     print(f"✓ Output directory: {config.output_dir}")
 
     # Check optional assets
-    validate_asset_path(config.cover_image, "Cover image")
-    if config.cover_image:
-        print(f"✓ Cover image: {config.cover_image}")
-
-    validate_asset_path(config.texture, "Texture")
-    if config.texture:
-        print(f"✓ Texture: {config.texture}")
-
-    validate_asset_path(config.drums, "Drums")
-    if config.drums:
-        print(f"✓ Drums: {config.drums}")
+    validate_asset_path(config.static_image, "Static image")
+    if config.static_image:
+        print(f"✓ Static image: {config.static_image}")
 
     # Check disk space
     needed_bytes = estimate_disk_space_needed(config.input_dir)

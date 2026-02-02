@@ -7,6 +7,7 @@ from pathlib import Path
 from soundweave.config import PipelineConfig
 from soundweave.ffmpeg.commands import build_mp3_command
 from soundweave.ffmpeg.executor import ProcessingError, run_ffmpeg
+from soundweave.ffmpeg.probe import probe_loudnorm_duration
 from soundweave.logging.logger import setup_logger
 from soundweave.logging.manifest import ManifestBuilder
 from soundweave.stages.ingest import ingest_stage
@@ -83,7 +84,7 @@ class Pipeline:
 
             self.logger.info("")
 
-            # Stage 3: MP3 Encoding & Timestamps
+            # Stage 3: MP3 Encoding & YouTube Timestamps
             self.logger.info("=== Stage 3: MP3 Encoding & YouTube Timestamps ===")
             start_time = time.time()
 
@@ -102,16 +103,44 @@ class Pipeline:
             mp3_size_mb = merged_mp3.stat().st_size / (1024 ** 2)
             self.logger.info(f"  ✓ {merged_mp3.name} ({mp3_size_mb:.1f}MB)")
 
-            # Generate YouTube timestamps
+            # Measure actual post-loudnorm durations for accurate timestamps
             crossfade_s = self.config.fade_ms / 1000.0
             timestamps_path = self.config.output_dir / "youtube_description.txt"
 
+            self.logger.info("Measuring actual track durations (post-loudnorm)...")
+            actual_timestamps = [0.0]  # First track starts at 0
+            current_time = 0.0
+
+            for i, track in enumerate(tracks):
+                try:
+                    actual_duration = probe_loudnorm_duration(track.path)
+                    diff = actual_duration - track.duration_s
+                    self.logger.info(
+                        f"  [{i+1}] {track.filename}: "
+                        f"{track.duration_s:.2f}s → {actual_duration:.2f}s "
+                        f"({'+' if diff >= 0 else ''}{diff:.2f}s)"
+                    )
+
+                    if i < len(tracks) - 1:
+                        # Calculate next track start time
+                        current_time += actual_duration - crossfade_s
+                        actual_timestamps.append(current_time)
+
+                except Exception as e:
+                    self.logger.warning(f"  Failed to measure {track.filename}: {e}")
+                    # Fall back to original duration for this track
+                    if i < len(tracks) - 1:
+                        current_time += track.duration_s - crossfade_s
+                        actual_timestamps.append(current_time)
+
+            # Generate YouTube timestamps
             self.logger.info("Generating YouTube timestamps...")
             write_youtube_description(
                 timestamps_path,
                 tracks,
                 crossfade_s,
-                title="Tracklist"
+                title="Tracklist",
+                actual_timestamps=actual_timestamps if len(actual_timestamps) == len(tracks) else None
             )
             self.logger.info(f"  ✓ {timestamps_path.name}")
 

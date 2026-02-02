@@ -132,7 +132,8 @@ def write_youtube_description(
     output_path: Path,
     tracks: list[AudioTrack],
     crossfade_duration_s: float,
-    title: str = "Tracklist"
+    title: str = "Tracklist",
+    actual_timestamps: list[float] | None = None
 ) -> None:
     """Generate and write YouTube description file with timestamps.
 
@@ -141,8 +142,19 @@ def write_youtube_description(
         tracks: List of audio tracks in playback order
         crossfade_duration_s: Crossfade duration in seconds
         title: Optional title for the timestamp section
+        actual_timestamps: Optional list of actual timestamps (from silence detection).
+                          If provided, these are used instead of calculating from durations.
     """
-    timestamps = generate_youtube_timestamps(tracks, crossfade_duration_s)
+    if actual_timestamps and len(actual_timestamps) == len(tracks):
+        # Use actual detected timestamps
+        timestamps = []
+        for i, track in enumerate(tracks):
+            clean_name = clean_track_name(track.filename)
+            timestamps.append((actual_timestamps[i], clean_name))
+    else:
+        # Fall back to calculated timestamps
+        timestamps = generate_youtube_timestamps(tracks, crossfade_duration_s)
+
     description = format_youtube_description(timestamps, title)
 
     with open(output_path, "w", encoding="utf-8") as f:

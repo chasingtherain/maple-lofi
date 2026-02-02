@@ -215,7 +215,7 @@ def ingest_stage(config: PipelineConfig, logger: logging.Logger) -> list[AudioTr
         logger: Logger instance
 
     Returns:
-        Ordered list of AudioTrack objects (randomly selected if num_tracks specified)
+        Ordered list of AudioTrack objects
 
     Raises:
         ValidationError: If zero valid files found after filtering
@@ -223,10 +223,11 @@ def ingest_stage(config: PipelineConfig, logger: logging.Logger) -> list[AudioTr
     Process:
         1. Scan input directory for audio files (top-level only)
         2. Determine ordering (order.txt or natural sort)
-        3. Randomly select num_tracks if specified
-        4. Probe each file for metadata
-        5. Filter out corrupted files (with warnings)
-        6. Return ordered list
+        3. Shuffle if config.shuffle=True
+        4. Limit to num_tracks if specified
+        5. Probe each file for metadata
+        6. Filter out corrupted files (with warnings)
+        7. Return ordered list
     """
     import random
 
@@ -241,10 +242,15 @@ def ingest_stage(config: PipelineConfig, logger: logging.Logger) -> list[AudioTr
     ordered_filenames = determine_track_order(config.input_dir, audio_files, logger)
     logger.info(f"Track order determined: {len(ordered_filenames)} track(s) available")
 
-    # Randomly select num_tracks if specified and fewer than available
-    if config.num_tracks and config.num_tracks < len(ordered_filenames):
-        logger.info(f"Randomly selecting {config.num_tracks} track(s) from {len(ordered_filenames)} available")
-        ordered_filenames = random.sample(ordered_filenames, config.num_tracks)
+    # Apply shuffle if enabled
+    if config.shuffle:
+        logger.info("Shuffling track order")
+        random.shuffle(ordered_filenames)
+
+    # Limit to num_tracks if specified
+    if config.num_tracks is not None and config.num_tracks < len(ordered_filenames):
+        logger.info(f"Selecting first {config.num_tracks} track(s) from {len(ordered_filenames)} available")
+        ordered_filenames = ordered_filenames[:config.num_tracks]
         logger.info(f"Selected {len(ordered_filenames)} track(s) for processing")
 
     # Build filename → path mapping

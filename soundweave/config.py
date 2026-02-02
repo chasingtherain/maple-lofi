@@ -1,4 +1,4 @@
-"""Configuration dataclass for the Maple Lofi pipeline."""
+"""Configuration dataclass for the Soundweave pipeline."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,7 +23,8 @@ class PipelineConfig:
 
     # Audio processing parameters
     fade_ms: int = 3000                 # Crossfade duration in milliseconds (3 seconds)
-    num_tracks: int = 20                # Number of random tracks to select from input
+    num_tracks: int | None = None       # Number of tracks to select (None = all tracks)
+    shuffle: bool = True                # Whether to shuffle/randomize track selection
 
     # Generated at runtime (do not set manually)
     run_id: str = field(default_factory=lambda: str(uuid4()))

@@ -1,3 +1,3 @@
-"""Maple Lofi - MapleStory BGM to lofi YouTube longplay pipeline."""
+"""Soundweave - Random soundtrack selector and YouTube video generator."""
 
 __version__ = "0.1.0"

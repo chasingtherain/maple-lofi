@@ -34,7 +34,7 @@ def build_merge_command(
         return [
             "ffmpeg",
             "-i", str(track.path),
-            "-af", "loudnorm=I=-20:TP=-1.5:LRA=11",
+            "-af", "silenceremove=stop_periods=1:stop_duration=0.5:stop_threshold=-50dB,loudnorm=I=-20:TP=-1.5:LRA=11",
             "-ar", "48000",              # Resample to 48kHz
             "-ac", "2",                  # Stereo
             "-sample_fmt", "s16",        # 16-bit PCM
@@ -57,10 +57,10 @@ def build_merge_command(
 
     filter_parts = []
 
-    # Step 1: Normalize loudness for each input track
+    # Step 1: Trim trailing silence and normalize loudness for each input track
     for i in range(len(tracks)):
         filter_parts.append(
-            f"[{i}:a]loudnorm=I=-20:TP=-1.5:LRA=11[norm{i}]"
+            f"[{i}:a]silenceremove=stop_periods=1:stop_duration=0.5:stop_threshold=-50dB,loudnorm=I=-20:TP=-1.5:LRA=11[norm{i}]"
         )
 
     # Step 2: Chain crossfades using normalized streams

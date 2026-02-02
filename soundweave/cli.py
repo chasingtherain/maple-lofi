@@ -29,14 +29,14 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic: Random 20 tracks with video
+  # All tracks in order (no shuffle)
+  python -m soundweave --input input --output output --no-shuffle
+
+  # Random 20 tracks with video
+  python -m soundweave --input input --output output --image cover.png --num-tracks 20
+
+  # All tracks, shuffled, with video
   python -m soundweave --input input --output output --image cover.png
-
-  # Select specific number of tracks
-  python -m soundweave --input input --output output --image cover.png --num-tracks 30
-
-  # Just audio, no video
-  python -m soundweave --input input --output output
 
   # Custom crossfade duration
   python -m soundweave --input input --output output --fade-ms 5000
@@ -74,8 +74,13 @@ Examples:
     parser.add_argument(
         "--num-tracks",
         type=int,
-        default=20,
-        help="Number of random tracks to select (default: 20)"
+        default=None,
+        help="Number of tracks to select (default: all tracks)"
+    )
+    parser.add_argument(
+        "--no-shuffle",
+        action="store_true",
+        help="Disable shuffling - keep original/natural order"
     )
 
     return parser.parse_args()
@@ -96,6 +101,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         static_image=args.image,
         fade_ms=args.fade_ms,
         num_tracks=args.num_tracks,
+        shuffle=not args.no_shuffle,
     )
 
 

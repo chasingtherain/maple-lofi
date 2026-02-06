@@ -85,8 +85,8 @@ def parse_order_file(order_file: Path) -> list[str]:
             if not line or line.startswith("#"):
                 continue
 
-            # Split on whitespace to get filename only
-            filename = line.split()[0]
+            # The whole line is the filename (spaces allowed)
+            filename = line
 
             # Just the filename, no paths
             if "/" in filename or "\\" in filename:
@@ -105,7 +105,7 @@ def validate_ordering(
     available_files: set[str],
     logger: logging.Logger
 ) -> None:
-    """Validate that order.txt lists all available files (and only those).
+    """Validate that order.txt lists only files that exist in input directory.
 
     Args:
         ordered_filenames: Filenames from order.txt (may have duplicates)
@@ -113,18 +113,17 @@ def validate_ordering(
         logger: Logger for warnings
 
     Raises:
-        ValidationError: If order.txt is inconsistent with available files
+        ValidationError: If order.txt lists files that don't exist
 
-    Rules (from SPECIFICATION.md):
-        - If order.txt exists, it MUST list all audio files
-        - Missing files in order.txt → Error
-        - Extra files in order.txt (not in input dir) → Error
+    Rules:
+        - Files in order.txt must exist in input directory → Error if not
+        - Files in input dir but not in order.txt → OK (just won't be included)
         - Duplicates allowed (same file processed multiple times)
     """
     # Get unique filenames from order.txt (to check coverage)
     unique_ordered = set(ordered_filenames)
 
-    # Check for files in order.txt but not in input directory
+    # Check for files in order.txt but not in input directory (ERROR)
     extra_in_order = unique_ordered - available_files
     if extra_in_order:
         raise ValidationError(
@@ -132,12 +131,11 @@ def validate_ordering(
             f"{', '.join(sorted(extra_in_order))}"
         )
 
-    # Check for files in input directory but not in order.txt
+    # Check for files in input directory but not in order.txt (just log info)
     missing_from_order = available_files - unique_ordered
     if missing_from_order:
-        raise ValidationError(
-            f"order.txt is missing files from input directory: "
-            f"{', '.join(sorted(missing_from_order))}"
+        logger.info(
+            f"Note: {len(missing_from_order)} file(s) in input directory not listed in order.txt (will be skipped)"
         )
 
     # Log duplicates (allowed, but worth noting)

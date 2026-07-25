@@ -40,7 +40,14 @@ import time
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import binary_opening, find_objects, gaussian_filter, label, map_coordinates
+from scipy.ndimage import (
+    binary_dilation,
+    binary_opening,
+    find_objects,
+    gaussian_filter,
+    label,
+    map_coordinates,
+)
 
 # This painting uses small bright sparkle/highlight dots on rocks, grass, and
 # bush foliage for a glossy look - those share flowers' low-saturation/
@@ -70,6 +77,18 @@ WHITE_HUE = (0.16, 0.40)       # ~58-144 degrees. Excludes blue sky/clouds (~200
                                 # the sandy dirt path (~48-53deg, also low-sat/high-val -
                                 # a real false positive hit during calibration, narrowed
                                 # the lower bound from 40 to 58 to exclude it specifically)
+
+# Background-infill tuning for sway_frame()'s duplicate-left-behind fix (see
+# its docstring). BG_DILATE_ITER pushes the infill region a few pixels past
+# the sharp mask edge so there's no visible seam between infilled and
+# original grass; BG_BLUR_SIGMA is the gaussian blur radius used to
+# approximate plausible grass fill under a removed flower blob - flower
+# blobs here are small (<= MAX_COMPONENT_AREA px), so a heavy blur of the
+# surrounding grass reads as a reasonable stand-in without needing a real
+# inpainting algorithm (cv2.inpaint / skimage inpaint_biharmonic are not
+# installed dependencies - only reach for them if this visibly looks bad).
+BG_DILATE_ITER = 4
+BG_BLUR_SIGMA = 16.0
 
 
 def rgb_to_hsv(rgb: np.ndarray) -> np.ndarray:
@@ -151,13 +170,32 @@ def sway_frame(frame: np.ndarray, mask: np.ndarray, t: float, amplitude: float, 
     8 -> 20 -> 30px, sublinear) because the effect was bounded by the
     mask's own small size, not actually moving anything.
 
-    Fix: compute the candidate source position for every destination pixel
-    first (pure spatial sine wave, no mask gating), then look up the mask's
-    value *at that source position* - i.e. "would this pixel have been
-    flower-colored back where it's being pulled from?" This correctly
-    paints flower color into the new position AND clears the old one
-    (since the old position's own new source-after-shift no longer points
-    back to itself), which is what actually reads as motion.
+    Fix (source-position mask sampling): compute the candidate source
+    position for every destination pixel first (pure spatial sine wave, no
+    mask gating), then look up the mask's value *at that source position* -
+    i.e. "would this pixel have been flower-colored back where it's being
+    pulled from?" This correctly paints flower color into the new position
+    AND clears the old one (since the old position's own new
+    source-after-shift no longer points back to itself), which is what
+    actually reads as motion.
+
+    Second bug hit and fixed here (duplicate left behind): the above is
+    necessary but not sufficient. The final blend still used the raw,
+    original `frame` as the "background"/unmoved side of the composite -
+    but that frame still has the flower baked in at its original position.
+    A displaced flower's own original spot usually backward-samples to
+    grass (mask weight~0 there), so the blend leaves that pixel untouched -
+    i.e. still showing the undisplaced flower color from `frame`, while the
+    new position also now shows flower color. Net effect: a duplicate.
+    Confirmed by direct measurement: sampling the flower-center pixel at a
+    quarter-cycle-displaced timestep returned the *exact* original flower
+    RGB (distance 0.00) instead of drifting toward local grass color.
+
+    Fix: build a flower-removed background plate - the (dilated) flower
+    mask region infilled with a heavily blurred version of the frame - and
+    blend against *that* instead of the raw frame. `warped` still samples
+    the true (sharp, non-blurred) `frame` for the flower's actual color at
+    its new position; only the background/unmoved layer changes.
     """
     h_img, w_img = frame.shape[:2]
     yy, xx = np.mgrid[0:h_img, 0:w_img].astype(np.float32)
@@ -171,13 +209,25 @@ def sway_frame(frame: np.ndarray, mask: np.ndarray, t: float, amplitude: float, 
     # Weight by the mask *at the source* (where we're pulling color from),
     # not at the destination - this is what makes the flower actually
     # appear to move rather than just churn in place.
-    mask = map_coordinates(mask, coords, order=1, mode="nearest")
+    weight = map_coordinates(mask, coords, order=1, mode="nearest")
 
     warped = np.empty_like(frame)
     for c in range(3):
         warped[..., c] = map_coordinates(frame[..., c], coords, order=1, mode="nearest")
 
-    out = frame.astype(np.float32) * (1.0 - mask[..., None]) + warped.astype(np.float32) * mask[..., None]
+    # Flower-removed background plate: infill the dilated mask footprint
+    # (the flowers' *current*, undisplaced positions in this frame) with a
+    # heavy gaussian blur, which reads as plausible grass fill for blobs
+    # this small. Dilating past the sharp mask edge and softening the
+    # infill boundary avoids a visible seam against real surrounding grass.
+    dilated = binary_dilation(mask > 0.05, iterations=BG_DILATE_ITER).astype(np.float32)
+    dilated = gaussian_filter(dilated, sigma=1.5)
+    blurred = np.empty(frame.shape, dtype=np.float32)
+    for c in range(3):
+        blurred[..., c] = gaussian_filter(frame[..., c].astype(np.float32), sigma=BG_BLUR_SIGMA)
+    background = frame.astype(np.float32) * (1.0 - dilated[..., None]) + blurred * dilated[..., None]
+
+    out = background * (1.0 - weight[..., None]) + warped.astype(np.float32) * weight[..., None]
     return np.clip(out, 0, 255).astype(np.uint8)
 
 

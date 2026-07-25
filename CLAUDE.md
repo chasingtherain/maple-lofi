@@ -55,6 +55,14 @@ The `loop` subcommand is a parallel, separate entry point (`_run_loop_subcommand
 
 Lofi processing (texture/drums mixing, EQ, compression) is **not a goal of this project**, despite some historical ADRs using it as an example. It was fully removed from the code in an earlier refactor (`ca155e6`), and the docs describing it (`SPECIFICATION.md`, `TESTING_GUIDE.md`, `docs/PIPELINE_CONTRACT.md`) have since been deleted rather than updated. Scope going forward is strictly: stitch tracks together (crossfade/loudnorm/encode), optionally pair with video. Don't resurrect lofi-stage docs or code as "restoring" something — it's an intentionally dropped direction, not drift.
 
+## Continuity — TASK.md is the source of truth, not the user's memory
+
+Every session's `SessionStart` hook (`.claude/hooks/session_context.sh`) auto-injects recent commits, working-tree status, and `TASK.md`'s "Next up" section into context. This exists so a fresh session never needs a manual briefing on what was done or what's next — that means the underlying record has to actually stay current, not just the hook.
+
+- **At the end of any nontrivial unit of work**: update `TASK.md`. Move finished items from "Next up" into "Completed" with the commit hash, and update/add the next actionable item under "Next up". This is not a courtesy step — it's the only thing that makes the auto-loaded context correct for the next session. Skipping it silently breaks the continuity this hook exists to provide.
+- **At the start of a session**: use the auto-injected commits/status/Next-up context (or read `TASK.md`/`git log` directly if it's missing) before asking the user what to work on. If "Next up" already names the task, start there rather than asking.
+- Non-obvious decisions (why an approach was chosen, a surprising result, a rejected alternative) belong in `TASK.md`'s per-task record or `docs/ADRs/`, not left to be re-explained verbally next time.
+
 ## Known gaps
 
 - `tests/` has no actual test files yet, only `__init__.py`. `pyproject.toml` is already configured for pytest (`testpaths = ["tests"]`), so adding `tests/test_*.py` files just works.

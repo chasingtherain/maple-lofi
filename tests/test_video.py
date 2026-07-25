@@ -14,8 +14,12 @@ from unittest.mock import patch
 
 import pytest
 
-from soundweave.ffmpeg.commands import build_video_sequence_command
+from soundweave.ffmpeg.commands import (
+    build_animated_background_command,
+    build_video_sequence_command,
+)
 from soundweave.stages.video import (
+    animated_background_video_stage,
     calculate_sequence_duration,
     match_images_to_tracks,
     video_sequence_stage,
@@ -297,3 +301,144 @@ def test_video_sequence_stage_copies_first_image_as_thumbnail(
     src, dst = mock_copy2.call_args[0]
     assert src == tmp_path / "first.png"
     assert dst == tmp_path / "thumbnail.png"
+
+
+# --- build_animated_background_command (pure command builder) -----------
+
+
+def test_build_animated_background_command_loops_the_background_video():
+    cmd = build_animated_background_command(
+        Path("audio.wav"), Path("loop.mp4"), Path("out.mp4"), 65.0
+    )
+    # -stream_loop -1 must appear before the background video's -i, not the audio's
+    loop_idx = cmd.index("-stream_loop")
+    assert cmd[loop_idx + 1] == "-1"
+    bg_input_idx = cmd.index("loop.mp4")
+    audio_input_idx = cmd.index("audio.wav")
+    assert loop_idx < bg_input_idx < audio_input_idx
+
+
+def test_build_animated_background_command_maps_video_and_audio():
+    cmd = build_animated_background_command(
+        Path("audio.wav"), Path("loop.mp4"), Path("out.mp4"), 65.0
+    )
+    assert "0:v:0" in cmd
+    assert "1:a:0" in cmd
+
+
+def test_build_animated_background_command_sets_exact_duration():
+    cmd = build_animated_background_command(
+        Path("audio.wav"), Path("loop.mp4"), Path("out.mp4"), 65.0
+    )
+    t_idx = cmd.index("-t")
+    assert cmd[t_idx + 1] == "65.0"
+
+
+def test_build_animated_background_command_reencodes_video_not_stream_copy():
+    """Stream-copying a looped source can only cut at the nearest keyframe;
+    re-encoding is what makes the -t trim land on an exact frame."""
+    cmd = build_animated_background_command(
+        Path("audio.wav"), Path("loop.mp4"), Path("out.mp4"), 65.0
+    )
+    c_v_idx = cmd.index("-c:v")
+    assert cmd[c_v_idx + 1] == "libx264"
+
+
+def test_build_animated_background_command_scales_and_pads_to_1080p():
+    """Guards against odd-dimension/non-1920x1080 background videos failing
+    the yuv420p encode only after the full audio pipeline has already run."""
+    cmd = build_animated_background_command(
+        Path("audio.wav"), Path("loop.mp4"), Path("out.mp4"), 65.0
+    )
+    vf_idx = cmd.index("-vf")
+    assert "scale=1920:1080" in cmd[vf_idx + 1]
+    assert "pad=1920:1080" in cmd[vf_idx + 1]
+
+
+def test_build_animated_background_command_no_redundant_shortest_flag():
+    """-t already bounds the (infinitely-looped) video to the audio length;
+    -shortest alongside it would be a redundant, confusing double-guard."""
+    cmd = build_animated_background_command(
+        Path("audio.wav"), Path("loop.mp4"), Path("out.mp4"), 65.0
+    )
+    assert "-shortest" not in cmd
+
+
+def test_build_animated_background_command_output_path_is_last_arg():
+    output_path = Path("final_video.mp4")
+    cmd = build_animated_background_command(
+        Path("audio.wav"), Path("loop.mp4"), output_path, 65.0
+    )
+    assert cmd[-1] == str(output_path)
+
+
+def test_build_animated_background_command_does_not_execute_anything():
+    """Pure function: returns a list, never touches the filesystem/subprocess."""
+    cmd = build_animated_background_command(
+        Path("nonexistent.wav"), Path("also_nonexistent.mp4"),
+        Path("also_nonexistent_out.mp4"), 65.0,
+    )
+    assert isinstance(cmd, list)
+    assert all(isinstance(arg, str) for arg in cmd)
+
+
+# --- animated_background_video_stage (orchestration, FFmpeg execution mocked) --
+
+
+@patch("soundweave.stages.video.run_ffmpeg")
+@patch("soundweave.stages.video.probe_audio_file")
+def test_animated_background_video_stage_uses_probed_audio_duration(
+    mock_probe, mock_run_ffmpeg, tmp_path, logger
+):
+    from soundweave.ffmpeg.probe import AudioMetadata
+
+    mock_probe.return_value = AudioMetadata(
+        duration_s=65.0, sample_rate=48000, channels=2, codec="pcm_s16le"
+    )
+
+    audio_path = tmp_path / "merged.wav"
+    audio_path.touch()
+    background_video = tmp_path / "loop.mp4"
+    background_video.touch()
+
+    def _fake_render(*args, **kwargs):
+        (tmp_path / "final_video.mp4").touch()
+
+    mock_run_ffmpeg.side_effect = _fake_render
+
+    output_path = animated_background_video_stage(audio_path, background_video, tmp_path, logger)
+
+    assert output_path == tmp_path / "final_video.mp4"
+    mock_run_ffmpeg.assert_called_once()
+    built_command = mock_run_ffmpeg.call_args[0][0]
+    assert built_command[-1] == str(output_path)
+    t_idx = built_command.index("-t")
+    assert built_command[t_idx + 1] == "65.0"
+
+
+@patch("soundweave.stages.video.run_ffmpeg")
+@patch("soundweave.stages.video.probe_audio_file")
+def test_animated_background_video_stage_does_not_copy_a_thumbnail(
+    mock_probe, mock_run_ffmpeg, tmp_path, logger
+):
+    """Unlike the static-image modes, there's no single representative frame
+    to copy out as a thumbnail -- shutil.copy2 should never be called."""
+    from soundweave.ffmpeg.probe import AudioMetadata
+
+    mock_probe.return_value = AudioMetadata(
+        duration_s=10.0, sample_rate=48000, channels=2, codec="pcm_s16le"
+    )
+
+    audio_path = tmp_path / "merged.wav"
+    audio_path.touch()
+    background_video = tmp_path / "loop.mp4"
+    background_video.touch()
+
+    def _fake_render(*args, **kwargs):
+        (tmp_path / "final_video.mp4").touch()
+
+    mock_run_ffmpeg.side_effect = _fake_render
+
+    with patch("soundweave.stages.video.shutil.copy2") as mock_copy2:
+        animated_background_video_stage(audio_path, background_video, tmp_path, logger)
+        mock_copy2.assert_not_called()

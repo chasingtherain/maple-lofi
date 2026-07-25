@@ -280,7 +280,8 @@ def parse_mashup_args(argv: list[str] | None = None) -> argparse.Namespace:
         argv: Argument list (defaults to sys.argv[2:] — after the 'mashup' token).
 
     Returns:
-        Parsed namespace with: urls, output, fade_ms, shuffle, strict, cache_dir.
+        Parsed namespace with: urls, output, fade_ms, shuffle, strict,
+        cache_dir, image, images_dir, animated_background.
     """
     from soundweave.mashup_config import DEFAULT_FADE_MS
 
@@ -310,6 +311,10 @@ Examples:
 
   # One image per track, held for that track's actual duration
   soundweave mashup --urls urls.txt --output output --images covers/
+
+  # Looping animated background instead of a static image (e.g. output
+  # from tools/ambient_bg/composite.sh)
+  soundweave mashup --urls urls.txt --output output --animated-background loop.mp4
 
 urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
 (same convention as order.txt).
@@ -374,6 +379,17 @@ urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
             "filename); each is shown for its track's actual duration"
         )
     )
+    image_group.add_argument(
+        "--animated-background",
+        type=Path,
+        default=None,
+        dest="animated_background",
+        help=(
+            "Short, pre-rendered, seamlessly looping background video (e.g. "
+            "tools/ambient_bg/composite.sh's final.mp4), looped to cover the "
+            "full audio duration instead of a static image"
+        )
+    )
 
     return parser.parse_args(argv)
 
@@ -395,6 +411,7 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     from soundweave.stages.download import download_stage
     from soundweave.stages.merge import merge_stage
     from soundweave.stages.video import (
+        animated_background_video_stage,
         match_images_to_tracks,
         video_sequence_stage,
         video_stage,
@@ -417,11 +434,13 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             cache_dir=args.cache_dir,
             static_image=args.image,
             images_dir=args.images_dir,
+            animated_background=args.animated_background,
         )
 
         validate_asset_path(config.static_image, "Static image")
         if config.images_dir is not None and not config.images_dir.is_dir():
             raise ValidationError(f"--images directory not found: {config.images_dir}")
+        validate_asset_path(config.animated_background, "Animated background video")
 
         logger = setup_logger(config.output_dir / "mashup_log.txt")
 
@@ -495,7 +514,8 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         logger.info(f"  {description_path.name}")
         logger.info("")
 
-        # Stage 4: Video (optional) — static image or per-track image sequence
+        # Stage 4: Video (optional) — static image, per-track image sequence,
+        # or looping animated background
         final_video = None
         if config.images_dir is not None:
             images = natural_sort([
@@ -507,9 +527,13 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             final_video = video_sequence_stage(merged_clean, image_sequence, config.output_dir, logger)
         elif config.static_image is not None:
             final_video = video_stage(merged_clean, config, logger)
+        elif config.animated_background is not None:
+            final_video = animated_background_video_stage(
+                merged_clean, config.animated_background, config.output_dir, logger
+            )
         else:
             logger.info("=== Stage 4: Video Rendering ===")
-            logger.info("No --image/--images specified, skipping video rendering")
+            logger.info("No --image/--images/--animated-background specified, skipping video rendering")
 
         logger.info("")
         logger.info("=" * 60)
@@ -538,6 +562,76 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         return 2
 
 
+def parse_mashup_ui_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments for the 'mashup-ui' subcommand.
+
+    Args:
+        argv: Argument list (defaults to sys.argv[2:] — after the 'mashup-ui' token).
+
+    Returns:
+        Parsed namespace with: port, output, no_browser.
+    """
+    parser = argparse.ArgumentParser(
+        prog="soundweave mashup-ui",
+        description=(
+            "Local web form for the mashup subcommand: paste YouTube URLs and "
+            "upload a cover image in a browser, then watch the run progress "
+            "live. Binds to 127.0.0.1 only and shells out to the same "
+            "'soundweave mashup' subcommand you'd run by hand — nothing "
+            "leaves this machine."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  soundweave mashup-ui
+  soundweave mashup-ui --port 9000
+  soundweave mashup-ui --output output/mashup_ui --no-browser
+        """
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8787,
+        help="Port to listen on (default: 8787)"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("output") / "mashup_ui",
+        help="Base directory for per-run output folders (default: output/mashup_ui)"
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        dest="no_browser",
+        help="Don't automatically open a browser tab on startup"
+    )
+    return parser.parse_args(argv)
+
+
+def _run_mashup_ui_subcommand(argv: list[str]) -> int:
+    """Handle the 'mashup-ui' subcommand.
+
+    Args:
+        argv: Arguments after the 'mashup-ui' token (i.e. sys.argv[2:]).
+
+    Returns:
+        Exit code.
+    """
+    from soundweave.ui.server import run_server
+
+    try:
+        args = parse_mashup_ui_args(argv)
+        run_server(port=args.port, output_base=args.output, open_browser=not args.no_browser)
+        return 0
+    except KeyboardInterrupt:
+        print("\nStopped", file=sys.stderr)
+        return 0
+    except OSError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point.
 
@@ -549,6 +643,9 @@ def main() -> int:
 
     if len(sys.argv) > 1 and sys.argv[1] == "mashup":
         return _run_mashup_subcommand(sys.argv[2:])
+
+    if len(sys.argv) > 1 and sys.argv[1] == "mashup-ui":
+        return _run_mashup_ui_subcommand(sys.argv[2:])
 
     try:
         args = parse_args()

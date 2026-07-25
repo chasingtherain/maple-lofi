@@ -13,10 +13,20 @@ import shutil
 from pathlib import Path
 
 from soundweave.config import PipelineConfig
-from soundweave.ffmpeg.commands import build_video_command, build_video_sequence_command
+from soundweave.ffmpeg.commands import (
+    build_animated_background_command,
+    build_video_command,
+    build_video_sequence_command,
+)
 from soundweave.ffmpeg.executor import run_ffmpeg
 from soundweave.ffmpeg.probe import probe_audio_file
 from soundweave.utils.validators import ValidationError
+
+
+def _log_output_size(output_path: Path, logger: logging.Logger) -> None:
+    """Log a rendered video's file size. Shared by all Stage 4 modes."""
+    video_size_mb = output_path.stat().st_size / (1024 ** 2)
+    logger.info(f"  ✓ {output_path.name} ({video_size_mb:.1f}MB)")
 
 
 def video_stage(
@@ -82,8 +92,7 @@ def video_stage(
         timeout=None
     )
 
-    video_size_mb = output_path.stat().st_size / (1024 ** 2)
-    logger.info(f"  ✓ {output_path.name} ({video_size_mb:.1f}MB)")
+    _log_output_size(output_path, logger)
 
     # Copy static image to output as thumbnail
     thumbnail_ext = config.static_image.suffix  # .png or .jpg
@@ -222,14 +231,83 @@ def video_sequence_stage(
         timeout=None
     )
 
-    video_size_mb = output_path.stat().st_size / (1024 ** 2)
-    logger.info(f"  ✓ {output_path.name} ({video_size_mb:.1f}MB)")
+    _log_output_size(output_path, logger)
 
     # Copy the first image in the sequence to output as thumbnail
     first_image = image_sequence[0][0]
     thumbnail_path = output_dir / f"thumbnail{first_image.suffix}"
     logger.info(f"Copying first sequence image to {thumbnail_path.name}...")
     shutil.copy2(first_image, thumbnail_path)
+
+    logger.info("Video rendering complete")
+
+    return output_path
+
+
+def animated_background_video_stage(
+    audio_path: Path,
+    background_video: Path,
+    output_dir: Path,
+    logger: logging.Logger,
+) -> Path:
+    """Stage 4 (alternate mode): pair audio with a looping animated background.
+
+    Companion to `video_stage()`/`video_sequence_stage()`: instead of a
+    static image, a short pre-rendered looping video is repeated to cover
+    the full audio duration. Intended input is `tools/ambient_bg/`'s
+    `composite.sh` output (`final.mp4` — a seamless DepthFlow
+    parallax/particle loop, optionally with swaying flowers/foliage) or
+    any similarly-prepared short seamless loop; that pipeline is a
+    standalone research tool and is not invoked from here — this stage
+    only consumes its already-rendered output file.
+
+    Scaled/padded to 1920x1080 the same way as `video_stage()`'s static-image
+    path (see `build_animated_background_command()`) rather than trusted
+    as-is, so a background video with an odd width/height doesn't fail the
+    encode only after the full audio pipeline has already run. No thumbnail
+    is generated — there's no single representative frame the way a static
+    cover image is one; the user supplies their own thumbnail separately
+    when uploading.
+
+    Args:
+        audio_path: Path to final audio (merged.wav or merged.mp3)
+        background_video: Path to the short looping background video
+        output_dir: Directory to write final_video.mp4 into
+        logger: Logger instance
+
+    Returns:
+        Path to final_video.mp4
+
+    Output format:
+        - 1920x1080 (scale/pad, preserve aspect ratio)
+        - Duration matches audio exactly
+        - YouTube-ready quality
+    """
+    logger.info("=== Stage 4: Video Rendering (animated background) ===")
+    logger.info(f"Background video: {background_video.name}")
+
+    audio_metadata = probe_audio_file(audio_path)
+    duration_s = audio_metadata.duration_s
+    logger.info(f"Audio duration: {duration_s:.2f}s")
+
+    output_path = output_dir / "final_video.mp4"
+
+    command = build_animated_background_command(
+        audio_path,
+        background_video,
+        output_path,
+        duration_s,
+    )
+
+    logger.info("Rendering video (looping background to match audio, this may take a while)...")
+    run_ffmpeg(
+        command,
+        logger,
+        description="Video rendering with looping animated background",
+        timeout=None
+    )
+
+    _log_output_size(output_path, logger)
 
     logger.info("Video rendering complete")
 

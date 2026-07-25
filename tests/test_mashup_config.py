@@ -23,10 +23,16 @@ class TestMashupConfig:
             urls_file=str(tmp_path / "urls.txt"),
             output_dir=str(tmp_path / "out"),
             cache_dir=str(tmp_path / "cache"),
+            animated_background=str(tmp_path / "loop.mp4"),
         )
         assert isinstance(config.urls_file, Path)
         assert isinstance(config.output_dir, Path)
         assert isinstance(config.cache_dir, Path)
+        assert isinstance(config.animated_background, Path)
+
+    def test_animated_background_defaults_to_none(self, tmp_path):
+        config = MashupConfig(urls_file=tmp_path / "urls.txt", output_dir=tmp_path / "out")
+        assert config.animated_background is None
 
     def test_run_id_and_timestamp_auto_generated(self, tmp_path):
         config = MashupConfig(urls_file=tmp_path / "urls.txt", output_dir=tmp_path / "out")

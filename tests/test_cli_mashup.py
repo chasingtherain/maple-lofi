@@ -26,6 +26,7 @@ class TestParseMashupArgs:
         assert args.cache_dir is None
         assert args.image is None
         assert args.images_dir is None
+        assert args.animated_background is None
 
     def test_fade_ms_override(self):
         args = parse_mashup_args(
@@ -71,5 +72,31 @@ class TestParseMashupArgs:
                 [
                     "--urls", "urls.txt", "--output", "output",
                     "--image", "cover.png", "--images", "covers/",
+                ]
+            )
+
+    def test_animated_background_flag(self):
+        args = parse_mashup_args(
+            ["--urls", "urls.txt", "--output", "output", "--animated-background", "loop.mp4"]
+        )
+        assert args.animated_background == Path("loop.mp4")
+        assert args.image is None
+        assert args.images_dir is None
+
+    def test_animated_background_and_image_are_mutually_exclusive(self):
+        with pytest.raises(SystemExit):
+            parse_mashup_args(
+                [
+                    "--urls", "urls.txt", "--output", "output",
+                    "--image", "cover.png", "--animated-background", "loop.mp4",
+                ]
+            )
+
+    def test_animated_background_and_images_are_mutually_exclusive(self):
+        with pytest.raises(SystemExit):
+            parse_mashup_args(
+                [
+                    "--urls", "urls.txt", "--output", "output",
+                    "--images", "covers/", "--animated-background", "loop.mp4",
                 ]
             )

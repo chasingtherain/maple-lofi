@@ -37,13 +37,22 @@ class MashupConfig:
                      images, etc.) doesn't re-download. Defaults to
                      ./.cache/youtube.
         static_image: Single cover image for the whole video's duration
-                     (mutually exclusive with images_dir). Same attribute
-                     name as PipelineConfig.static_image so video_stage()
-                     can be called with a MashupConfig unmodified.
+                     (mutually exclusive with images_dir and
+                     animated_background). Same attribute name as
+                     PipelineConfig.static_image so video_stage() can be
+                     called with a MashupConfig unmodified.
         images_dir:  Directory of per-track images for the video's
                      per-track image-swap mode (mutually exclusive with
-                     static_image). See match_images_to_tracks() /
-                     video_sequence_stage() in soundweave/stages/video.py.
+                     static_image and animated_background). See
+                     match_images_to_tracks() / video_sequence_stage() in
+                     soundweave/stages/video.py.
+        animated_background: Path to a short, pre-rendered, seamlessly
+                     looping background video (mutually exclusive with
+                     static_image and images_dir) — e.g. the output of
+                     tools/ambient_bg/composite.sh's final.mp4. Looped via
+                     ffmpeg to cover the full audio duration. See
+                     animated_background_video_stage() in
+                     soundweave/stages/video.py.
         run_id:      UUID for this run, auto-generated.
         timestamp:   ISO-8601 UTC timestamp, auto-generated.
     """
@@ -56,6 +65,7 @@ class MashupConfig:
     cache_dir: Path | None = None
     static_image: Path | None = None
     images_dir: Path | None = None
+    animated_background: Path | None = None
     run_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -72,5 +82,7 @@ class MashupConfig:
             self.static_image = Path(self.static_image)
         if isinstance(self.images_dir, str):
             self.images_dir = Path(self.images_dir)
+        if isinstance(self.animated_background, str):
+            self.animated_background = Path(self.animated_background)
         if self.cache_dir is None:
             self.cache_dir = DEFAULT_CACHE_DIR

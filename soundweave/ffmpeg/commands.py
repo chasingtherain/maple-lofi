@@ -301,6 +301,69 @@ def build_video_sequence_command(
     return cmd
 
 
+def build_animated_background_command(
+    audio_path: Path,
+    background_video: Path,
+    output_path: Path,
+    duration_s: float,
+) -> list[str]:
+    """Build FFmpeg command for pairing audio with a looping animated background.
+
+    Companion to `build_video_command()`: instead of one static image held
+    for the whole runtime, a short pre-rendered looping video (e.g.
+    `tools/ambient_bg/`'s `final.mp4` — a seamless ~20s parallax/particle
+    loop) is repeated via `-stream_loop -1` to cover the full audio
+    duration, then re-encoded and trimmed to an exact length.
+    `background_video` is expected to already be roughly YouTube-ready, but
+    is still scaled/padded to 1920x1080 (same filter as
+    `build_video_command()`'s static-image path) rather than trusted as-is —
+    an odd width/height (not evenly divisible by 2) would otherwise fail the
+    `yuv420p` encode only after the full audio pipeline has already run.
+
+    Args:
+        audio_path: Path to final audio (merged.wav or merged.mp3)
+        background_video: Path to the short looping background video
+        output_path: Path for output MP4
+        duration_s: Audio duration in seconds
+
+    Returns:
+        FFmpeg command as list of arguments
+
+    Output format:
+        - 1920x1080 (scale/pad, preserve aspect ratio — same as build_video_command)
+        - H.264 (yuv420p, high profile) — re-encoded (not stream-copied) so
+          the `-t` trim lands on an exact frame rather than the nearest
+          keyframe in the looped source
+        - AAC audio (192kbps)
+        - Duration matches audio exactly
+    """
+    return [
+        "ffmpeg",
+        "-stream_loop", "-1",            # Loop background video indefinitely
+        "-i", str(background_video),
+        "-i", str(audio_path),
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-vf", (                         # Guard against non-1920x1080/odd-dimension input
+            "scale=1920:1080:force_original_aspect_ratio=decrease,"
+            "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black"
+        ),
+        "-c:v", "libx264",               # H.264 codec
+        "-preset", "medium",             # Encoding preset
+        "-crf", "18",                    # Quality (lower = better, 18 is visually lossless)
+        "-pix_fmt", "yuv420p",           # Pixel format for compatibility
+        "-profile:v", "high",            # H.264 profile
+        "-c:a", "aac",                   # AAC audio codec
+        "-b:a", "192k",                  # Audio bitrate
+        "-t", str(duration_s),           # Explicit duration (video is infinitely looped, so
+                                          # this alone bounds output length -- -shortest would
+                                          # be redundant)
+        "-movflags", "+faststart",       # YouTube-ready fast start
+        "-y",                            # Overwrite output
+        str(output_path)
+    ]
+
+
 def build_video_command(
     audio_path: Path,
     cover_image: Path,

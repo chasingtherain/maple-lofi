@@ -6,6 +6,9 @@ from pathlib import Path
 from soundweave.stages.ingest import AudioTrack
 
 
+_AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac", ".mpeg"}
+
+
 def clean_track_name(filename: str) -> str:
     """Clean up track filename for YouTube display.
 
@@ -22,17 +25,20 @@ def clean_track_name(filename: str) -> str:
         'track name'
         >>> clean_track_name("My-Song.flac")
         'My-Song'
+        >>> clean_track_name("1-05. Littleroot Town_.mp3")
+        'Littleroot Town'
     """
-    # Remove file extensions (handle double extensions like .mp3.mpeg)
+    # Remove known audio extensions only (handles double extensions like .mp3.mpeg)
+    # Using suffix check avoids stripping parts of filenames that contain dots
     name = filename
-    while True:
-        new_name = Path(name).stem
-        if new_name == name:
-            break
-        name = new_name
+    while Path(name).suffix.lower() in _AUDIO_EXTENSIONS:
+        name = Path(name).stem
 
-    # Replace underscores with spaces
-    name = name.replace("_", " ")
+    # Replace underscores with spaces and strip trailing whitespace
+    name = name.replace("_", " ").strip()
+
+    # Strip leading track number prefix like "1-05. " or "2-45. "
+    name = re.sub(r"^\d+-\d+\.\s*", "", name)
 
     return name
 

@@ -60,6 +60,25 @@ The original parallel-orchestration batch (T0-T3) plus its Tier 2 integration st
 
 **Acceptance**: swaying flowers visibly relocate without a duplicate lingering at the original position, confirmed on the real rendered video — not just the isolated single-frame test that caught the original bug.
 
+### T4 (ambient_bg): bush/tree sway — needs a genuinely different technique, not a mask reuse
+
+**Status**: not started. Scoped 2026-07-25. User explicitly asked for bushes/trees to sway too (not just flowers) — and explicitly asked to be told plainly if this can't look natural rather than have a bad-looking attempt pushed through. Assessment below is that answer: **do not reuse flower_sway.py's uniform-shift technique for this** — it will look artificial for these subjects. This needs a different, harder technique from the start, not a parameter tweak on the flower approach.
+
+**Why the flower technique won't generalize**:
+1. **Wrong motion model.** Real wind-sway is a *bend anchored at the base* — trunk/root barely moves, canopy/foliage moves more, displacement increases with height above ground. `flower_sway.py`'s uniform horizontal shift (same `dx` for every masked pixel regardless of position within the blob) reads fine for a small flower head but would make a whole bush/tree look like it's rigidly sliding sideways as one piece — an obviously fake "cardboard cutout" motion at this size, much more noticeable than on a tiny flower.
+2. **Weaker color segmentation.** Flowers popped out because they're bright white/yellow against green grass — high contrast, and even then the mask needed real calibration (see Addendum 3 / T3's root cause) to exclude the dirt path and the painting's highlight sparkles. Bushes and trees are dark-to-medium green *on top of grass that's also green* — much less contrast for a color-threshold mask to exploit, likely a noisier result than flowers ever were.
+
+**What to actually build instead**: a height-gradient bend, not a uniform shift.
+1. Segment bush/tree regions (still likely color/luminance-based — darker, more saturated green than grass — but expect this to need more calibration work than flowers did, precisely because of the lower contrast above; may need to lean more on spatial priors, e.g. "large connected components well above the flower-zone y-range," than on color alone).
+2. For each connected component (one bush or tree canopy), find its own **base/anchor** — the bottom of its bounding region — and compute displacement as `dx(x,y) = amplitude * sway_wave(t) * ((y_anchor - y) / component_height)`, i.e. zero at the base, maximum at the top. This is a per-component gradient, not a global one — each bush/tree sways independently based on its own geometry.
+3. Apply the same source-side-mask-sampling fix from T3 (paint at the shifted position by sampling the mask at the *source*, not the destination) and the same flower-removed-style background-plate infill (T3's fix) so bushes/trees don't leave duplicates either — both T3 fixes are prerequisites, not just precedents, since this reuses that corrected compositing approach.
+
+**Honest risk, flagged up front rather than discovered mid-build**: even the height-gradient version might not look convincing — real foliage sway also involves internal turbulence (individual leaf clusters moving semi-independently, not the whole canopy as one smooth bending unit) that this approach won't capture. If a first attempt still looks artificial after the anchor/gradient fix, that's the signal to stop and report back per the user's explicit instruction, rather than keep tuning parameters on a technique that's fundamentally the wrong shape for the problem. Genuinely different alternatives at that point: a depth/segmentation-based approach with per-leaf-cluster masks (much more work), or accepting that only flowers (small, rigid-looking, already working once T3 lands) sway and leaving bushes/trees static.
+
+**Owns**: `tools/ambient_bg/` — likely a new script (e.g. `foliage_sway.py`) rather than extending `flower_sway.py`, since the technique differs enough that sharing one file would conflate two different algorithms. Reuse `rgb_to_hsv()` and the temp-file/rename I/O pattern from `flower_sway.py` rather than duplicating them.
+
+**Acceptance**: bushes/trees show visible, anchored (base-still, top-swaying) motion on the real rendered video with no duplication artifact — or, if that doesn't look natural after a genuine attempt with the height-gradient technique, a clear report back on what was tried and why it still doesn't work, per the user's explicit "let me know so we move on to other approaches" instruction. A subjectively-bad result shipped silently is not an acceptable outcome for this task.
+
 ---
 
 ## T2: DepthFlow ambient background pipeline — full record (done, kept for reference)

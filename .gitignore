@@ -22,6 +22,7 @@ wheels/
 
 # Virtual environments
 venv/
+.venv/
 ENV/
 env/
 
@@ -38,9 +39,7 @@ env/
 htmlcov/
 
 # Test outputs (local testing artifacts)
-test_input/
-test_output/
-test_assets/
+test_*/
 real_input/
 real_output/
 

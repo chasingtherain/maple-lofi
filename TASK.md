@@ -1,6 +1,6 @@
-# TASK.md — Parallel work breakdown
+# TASK.md — Work breakdown
 
-Scoped units of work sized for independent agents running in separate worktrees, with explicit file ownership so diffs don't collide. This is the task list behind the Stage 2 ("Parallel") orchestration exercise described in `AI-stages.md` — see the chat for the walkthrough of how to actually run it.
+Scoped units of work sized for independent agents running in separate worktrees, with explicit file ownership so diffs don't collide. This is the task list behind the Stage 2 ("Parallel") orchestration exercise described in `AI-stages.md`.
 
 ## Ground rules for every task
 
@@ -11,80 +11,29 @@ Scoped units of work sized for independent agents running in separate worktrees,
 
 ---
 
-## Tier 0 — solo, sequential, do first
+## Completed
 
-### T0: Lint cleanup
+The original parallel-orchestration batch (T0-T3) plus its Tier 2 integration step are done and merged to `main`. Kept here as a record of what shipped; not actionable.
 
-**Owns**: `soundweave/pipeline.py`, `soundweave/utils/validators.py`, `soundweave/logging/manifest.py`, `soundweave/ffmpeg/probe.py`, `soundweave/ffmpeg/executor.py`, `soundweave/stages/ingest.py`, `soundweave/utils/youtube.py`, `soundweave/logging/logger.py`, and only the two `except Exception` findings in `soundweave/cli.py`'s top-level error handling (not the argparse sections).
-
-**Why this runs alone, first**: `ruff check soundweave/` findings are scattered across nearly every existing file, including `cli.py`, which T2 also edits. Run this in parallel with anything else and every other task ends up rebasing against a moving target.
-
-**Acceptance**: `ruff check soundweave/` reports 0 findings. Pipeline still runs end-to-end against `real_input/` (or a fixture) with unchanged behavior.
-
-**Merge before starting Tier 1.**
-
----
-
-## Tier 1 — parallel batch (separate worktrees, run together)
-
-### T1: Unit tests for existing pure functions
-
-**Owns (new files only)**: `tests/test_natural_sort.py`, `tests/test_ingest.py`, `tests/test_merge.py`, `tests/test_youtube.py`
-
-**Scope**: cover the pure, FFmpeg-free functions —
-- `soundweave/utils/natural_sort.py::natural_sort`
-- `soundweave/stages/ingest.py::parse_order_file`, `validate_ordering`, `determine_track_order`
-- `soundweave/stages/merge.py::calculate_crossfade_durations`
-- `soundweave/utils/youtube.py::clean_track_name`, `format_timestamp`, `generate_youtube_timestamps`, `format_youtube_description`
-
-Edge cases already implied by existing docstrings: `order.txt` duplicates/comments/blank lines, short-track crossfade reduction to 50%, numbered-prefix filenames (`"1-05. Littleroot Town_.mp3"`).
-
-**Conflict surface**: none — only adds new files under `tests/`.
-
-**Acceptance**: `pytest tests/ -v` passes, one test file per module above.
-
-### T2: Mashup Phase 1 — YouTube download stage
-
-**Owns (new files)**: `soundweave/ytdlp/executor.py`, `soundweave/ytdlp/commands.py`, `soundweave/stages/download.py`, `soundweave/mashup_config.py`
-
-**Owns (existing file, additive only)**: `soundweave/cli.py` — add `parse_mashup_args()` / `_run_mashup_subcommand()` / dispatch, mirroring the existing `loop` subcommand exactly (`parse_loop_args`/`_run_loop_subcommand`). Don't touch the `main`/`loop` code paths.
-
-**Spec**: `PRD.md` §5-6. `yt-dlp` runs as an external subprocess binary, not a pip dependency — mirror the `ffmpeg/` module's `executor.py`/`commands.py` split. `urls.txt` format matches `order.txt` (one URL per line, `#` comments). Default order = as-listed, no shuffle. Reuses `merge_stage`/MP3 encoding unchanged — don't modify `merge.py` or `pipeline.py`.
-
-**Acceptance**: `soundweave mashup --urls urls.txt --output output` runs end-to-end against a short real `urls.txt` (2-3 public videos) and produces `merged.mp3` + `youtube_description.txt` with real video titles. Automated tests mock the `yt-dlp` subprocess call — no network access in the test suite.
-
-### T3: Mashup Phase 2 — per-track video image swap
-
-**Owns**: `soundweave/stages/video.py` (additive — new function, e.g. `video_sequence_stage()`; don't change the existing single-image path/signature), `soundweave/ffmpeg/commands.py` (new `build_video_sequence_command()`; don't modify `build_video_command()`)
-
-**Owns (new file)**: `tests/test_video.py` (timing-calculation logic only — not actual FFmpeg execution)
-
-**Spec**: `PRD.md` §7. `--images <dir>` holds one image per track, held for that track's actual measured duration; error at pre-flight if there are fewer images than tracks.
-
-**Does not touch `cli.py`.** The `--images` flag wiring into the mashup subcommand is deliberately deferred to Tier 2, so T2 and T3 never compete for the same file. Build and test this against a hand-constructed list of `(image_path, duration_s)` pairs, independent of the CLI.
+- **T0 — Lint cleanup** ✅ `cf851e3`. `ruff check soundweave/` clean; 8 remaining blind-except findings configured off in `pyproject.toml` (documented rationale) rather than papered over per-line.
+- **T1 — Unit tests for existing pure functions** ✅ `4e7000e`. `natural_sort`, `ingest.py` order.txt parsing, `merge.py` crossfade-duration calc, `youtube.py` track-name/timestamp formatting. 76 tests.
+- **T2 — Mashup Phase 1 (YouTube download stage)** ✅ `877548b`. `soundweave/ytdlp/`, `soundweave/stages/download.py`, `soundweave/mashup_config.py`, `mashup` subcommand in `cli.py`. Verified against real YouTube URLs.
+- **T3 — Mashup Phase 2 (per-track video image swap)** ✅ `5fcf82f`. `video_sequence_stage()`, `build_video_sequence_command()`, `match_images_to_tracks()`.
+- **Tier 2 integration — wire `--image`/`--images` into `mashup`** ✅ `60f498a`. `MashupConfig.static_image`/`images_dir`, mutually-exclusive CLI flags.
+- **Real-world validation run** ✅ 2026-07-25. 3 real YouTube URLs + a static background image → verified playable `final_video.mp4` (correct streams, correct duration, correct tracklist) via independent `ffprobe`/frame inspection, not just agent self-report.
 
 ---
 
-## Tier 2 — integration (solo, after T2 and T3 both merge)
+## Next up
 
-Wire T3's `--images` flag into T2's mashup subcommand in `cli.py` — the one deliberate point of contact between the two tasks, a few lines, done once both sides exist.
+### T1: On-video "Now Playing" track cards
 
----
+**Status**: not started. Renumbered from T4 (2026-07-25) — the "branded thumbnail" half of that task is dropped: the user will provide their own thumbnail, so thumbnail generation is out of scope entirely, not just deferred.
 
-## Tier 3 — future work (not started)
+**Owns**: `soundweave/stages/video.py` (additive), `soundweave/ffmpeg/commands.py` (additive — new `drawtext`-based command builder), `soundweave/cli.py` (additive — wire into the `mashup` subcommand).
 
-### T4: Ready-to-upload polish — on-video track cards + branded thumbnail
+**Scope**: burn the track title into the video at each track's actual start timestamp (reuse the same per-track timestamp data that already drives `youtube_description.txt` — do not recompute), fading in/out over ~4-5s via ffmpeg's `drawtext` filter (one `enable='between(t,start,start+5)'` clause per track). Requires: a font available at render time, and correct escaping of special characters (quotes/colons) in track titles passed to `drawtext`.
 
-**Status**: not started. Scoped 2026-07-25 after a real mashup run exposed the gap — the output video plays fine but doesn't look "finished": the thumbnail is a raw, unedited copy of the background image, and the tracklist only exists as a side text file (`youtube_description.txt`) a viewer never sees unless they check the description.
+**Out of scope**: thumbnail generation (user-provided) and YouTube Data API auto-upload (separate, bigger future task — OAuth, quota, metadata push).
 
-**Owns**: `soundweave/stages/video.py` (additive), `soundweave/ffmpeg/commands.py` (additive — new `drawtext`-based command builder(s)), `soundweave/cli.py` (additive — wire into the `mashup` subcommand).
-
-**Scope**:
-1. **On-video "Now Playing" track cards**: burn the track title into the video at each track's actual start timestamp (reuse the same per-track timestamp data that already drives `youtube_description.txt` — do not recompute), fading in/out over ~4-5s via ffmpeg's `drawtext` filter (one `enable='between(t,start,start+5)'` clause per track). Requires: a font available at render time, and correct escaping of special characters (quotes/colons) in track titles passed to `drawtext`.
-2. **Branded thumbnail**: replace the current "copy the source image as-is" thumbnail with one showing what's actually in the video (e.g. "N-Song Mashup" + track names) composited over the background image, sized/contrasted for readability at YouTube's small thumbnail display size.
-
-**Open implementation decision, make deliberately before starting**: thumbnail text compositing via ffmpeg `drawtext` on a single rendered frame (stays stdlib+ffmpeg-only, but fiddly multi-line layout) vs. pulling in Pillow (much easier text wrapping/sizing, but a new Python dependency — a real departure from this project's current stdlib-only rule per `CLAUDE.md`). Don't default into Pillow without deciding this on purpose.
-
-**Explicitly out of scope**: automating the actual YouTube upload via the Data API (OAuth, quota, metadata push). Bigger feature (external auth, credential storage) — track as a separate future task, not bundled here.
-
-**Acceptance**: a mashup run produces a video with visible, correctly-timed track-title overlays matching `youtube_description.txt`'s timestamps, and a thumbnail that's legibly different from the raw background image and shows the tracklist. Existing single-image/per-track-image video modes (`video_stage()`/`video_sequence_stage()`) unchanged in behavior when this feature is off.
+**Acceptance**: a mashup run produces a video with visible, correctly-timed track-title overlays matching `youtube_description.txt`'s timestamps. Existing single-image/per-track-image video modes (`video_stage()`/`video_sequence_stage()`) unchanged in behavior when this feature is off.

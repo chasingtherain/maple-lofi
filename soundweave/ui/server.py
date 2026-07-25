@@ -1,20 +1,27 @@
-"""Local web UI for the mashup subcommand.
+"""Local web UI for the mashup and loop subcommands.
 
-Stdlib-only HTTP server, bound to 127.0.0.1 only: serves a form to paste
-YouTube URLs and choose a video source (a single cover image, one image per
-track, or a looping animated background -- the same three mutually-exclusive
-modes as the CLI's `--image`/`--images`/`--animated-background`), then shells
-out to `python -m soundweave mashup` (the exact CLI subcommand you'd run by
-hand) and streams its combined stdout/stderr back to the browser. The browser
-is a thin front-end over the CLI, not a second pipeline implementation.
+Stdlib-only HTTP server, bound to 127.0.0.1 only. Two forms:
+
+- `/` (mashup): paste YouTube URLs and choose a video source (a single cover
+  image, one image per track, or a looping animated background -- the same
+  three mutually-exclusive modes as the CLI's
+  `--image`/`--images`/`--animated-background`), then shells out to
+  `python -m soundweave mashup`.
+- `/loop`: upload one audio file and a repeat count, then shells out to
+  `python -m soundweave loop`.
+
+Either form runs the exact CLI subcommand you'd type by hand as a subprocess
+and streams its combined stdout/stderr back to the browser. The browser is a
+thin front-end over the CLI, not a second pipeline implementation.
 """
 
 import json
+import shutil
 import subprocess
 import sys
 import threading
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
@@ -24,11 +31,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from soundweave.loop_config import AUDIO_EXTENSIONS as _AUDIO_EXTENSIONS
+from soundweave.loop_config import DEFAULT_GAP_MS, DEFAULT_TRIM_DB
 from soundweave.mashup_config import DEFAULT_FADE_MS
-from soundweave.ui.templates import INDEX_HTML, JOB_HTML
+from soundweave.ui.templates import INDEX_HTML, JOB_HTML, LOOP_HTML
 
 _LOG_TAIL_BYTES = 60_000
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_JOB_ID_TZ = timezone(timedelta(hours=8))  # GMT+8, for human-readable job-id timestamps
 
 
 def _parse_multipart(content_type: str, body: bytes) -> dict[str, list[Message]]:
@@ -65,18 +75,26 @@ class _Job:
         self.job_dir = job_dir
         self.process = process
         self.log_path = log_path
+        # Set once a failed run's directory has been removed (see
+        # _close_when_done below) -- holds the log's final bytes so the
+        # browser's last poll can still show them after the file is gone.
+        self.final_log: bytes | None = None
+        self.removed = False
 
     def status(self) -> dict:
         returncode = self.process.poll()
-        try:
-            data = self.log_path.read_bytes()[-_LOG_TAIL_BYTES:]
-        except FileNotFoundError:
-            data = b""
+        if self.final_log is not None:
+            data = self.final_log
+        else:
+            try:
+                data = self.log_path.read_bytes()[-_LOG_TAIL_BYTES:]
+            except FileNotFoundError:
+                data = b""
         return {
             "running": returncode is None,
             "returncode": returncode,
             "log": data.decode("utf-8", errors="replace"),
-            "output_dir": str(self.job_dir),
+            "output_dir": None if self.removed else str(self.job_dir),
         }
 
 
@@ -89,16 +107,19 @@ class _MashupUIServer(ThreadingHTTPServer):
         self.jobs: dict[str, _Job] = {}
         self._lock = threading.Lock()
 
+    def _new_job_dir(self) -> Path:
+        job_id = datetime.now(_JOB_ID_TZ).strftime("%Y%m%d-%H%M%S-") + uuid4().hex[:6]
+        job_dir = self.output_base / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        return job_dir
+
     def start_job(self, content_type: str, body: bytes) -> str:
         fields = _parse_multipart(content_type, body)
         urls_text = _field_text(fields, "urls").strip()
         if not urls_text:
             raise ValueError("No URLs provided")
 
-        job_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + uuid4().hex[:6]
-        job_dir = self.output_base / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-
+        job_dir = self._new_job_dir()
         urls_path = job_dir / "urls.txt"
         urls_path.write_text(urls_text + "\n", encoding="utf-8")
 
@@ -184,20 +205,93 @@ class _MashupUIServer(ThreadingHTTPServer):
                     bg_path.write_bytes(video_bytes)
                     cmd += ["--animated-background", str(bg_path)]
 
+        return self._launch_job(job_dir, cmd)
+
+    def start_loop_job(self, content_type: str, body: bytes) -> str:
+        fields = _parse_multipart(content_type, body)
+        audio_parts = fields.get("audio")
+        if not audio_parts:
+            raise ValueError("No audio file provided")
+        part = audio_parts[0]
+        filename = part.get_filename()
+        audio_bytes = part.get_payload(decode=True) or b""
+        if not filename or not audio_bytes:
+            raise ValueError("No audio file provided")
+
+        count_text = _field_text(fields, "count").strip()
+        try:
+            count = int(count_text)
+        except ValueError:
+            raise ValueError("Repeat count must be a whole number") from None
+        if count < 1:
+            raise ValueError("Repeat count must be at least 1")
+
+        ext = Path(filename).suffix.lower()
+        if ext not in _AUDIO_EXTENSIONS:
+            raise ValueError(
+                f"Unsupported audio file type '{ext or filename}' "
+                f"(expected one of: {', '.join(sorted(_AUDIO_EXTENSIONS))})"
+            )
+
+        job_dir = self._new_job_dir()
+        audio_path = job_dir / f"input{ext}"
+        audio_path.write_bytes(audio_bytes)
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "soundweave",
+            "loop",
+            str(audio_path),
+            "--count",
+            str(count),
+            "--output",
+            str(job_dir),
+        ]
+
+        gap_ms_text = _field_text(fields, "gap_ms", str(DEFAULT_GAP_MS)).strip()
+        try:
+            gap_ms = int(gap_ms_text) if gap_ms_text else DEFAULT_GAP_MS
+        except ValueError:
+            gap_ms = DEFAULT_GAP_MS
+        cmd += ["--gap-ms", str(gap_ms)]
+
+        trim_db_text = _field_text(fields, "trim_db", str(DEFAULT_TRIM_DB)).strip()
+        try:
+            trim_db = float(trim_db_text) if trim_db_text else DEFAULT_TRIM_DB
+        except ValueError:
+            trim_db = DEFAULT_TRIM_DB
+        cmd += ["--trim-db", str(trim_db)]
+
+        return self._launch_job(job_dir, cmd)
+
+    def _launch_job(self, job_dir: Path, cmd: list[str]) -> str:
+        job_id = job_dir.name
         log_path = job_dir / "process.log"
         # Must stay open past this function's return — the child process
         # writes to it for the lifetime of the subprocess, closed below by
         # the watcher thread once it exits.
         logf = open(log_path, "wb")  # noqa: SIM115
         process = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+        job = _Job(job_id, job_dir, process, log_path)
 
         def _close_when_done() -> None:
             process.wait()
             logf.close()
+            if process.returncode != 0:
+                # A failed run has no real output worth keeping -- capture
+                # the log's tail in memory for the browser's last poll,
+                # then remove the job dir instead of leaving a stray folder
+                # (uploaded input, partial logs) behind.
+                try:
+                    job.final_log = log_path.read_bytes()[-_LOG_TAIL_BYTES:]
+                except FileNotFoundError:
+                    job.final_log = b""
+                shutil.rmtree(job_dir, ignore_errors=True)
+                job.removed = True
 
         threading.Thread(target=_close_when_done, daemon=True).start()
 
-        job = _Job(job_id, job_dir, process, log_path)
         with self._lock:
             self.jobs[job_id] = job
         return job_id
@@ -222,6 +316,8 @@ class _Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self._send(INDEX_HTML.encode("utf-8"))
+        elif parsed.path == "/loop":
+            self._send(LOOP_HTML.encode("utf-8"))
         elif parsed.path.startswith("/job/"):
             job_id = parsed.path[len("/job/") :]
             if job_id not in self.server.jobs:
@@ -244,14 +340,18 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(b"<h1>Not found</h1>", status=404)
 
     def do_POST(self) -> None:
-        if self.path != "/run":
+        if self.path == "/run":
+            starter = self.server.start_job
+        elif self.path == "/run-loop":
+            starter = self.server.start_loop_job
+        else:
             self._send(b"<h1>Not found</h1>", status=404)
             return
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
         content_type = self.headers.get("Content-Type", "")
         try:
-            job_id = self.server.start_job(content_type, body)
+            job_id = starter(content_type, body)
         except ValueError as e:
             self._send(f"<h1>Bad request</h1><p>{escape(str(e))}</p>".encode(), status=400)
             return
@@ -261,19 +361,20 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int, output_base: Path, open_browser: bool = True) -> None:
-    """Start the mashup web UI and block until interrupted (Ctrl+C).
+    """Start the mashup/loop web UI and block until interrupted (Ctrl+C).
 
     Args:
         port: Port to listen on, bound to 127.0.0.1 only.
         output_base: Base directory under which each submitted run gets its
-            own timestamped subdirectory (urls.txt, cover image, and all of
-            `mashup`'s normal output land there).
+            own timestamped subdirectory (urls.txt/uploaded audio, cover
+            image, and all of `mashup`'s or `loop`'s normal output land
+            there).
         open_browser: Whether to auto-open a browser tab on startup.
     """
     output_base.mkdir(parents=True, exist_ok=True)
     server = _MashupUIServer(("127.0.0.1", port), _Handler, output_base)
     url = f"http://127.0.0.1:{port}/"
-    print(f"Soundweave mashup UI running at {url}")
+    print(f"Soundweave mashup/loop UI running at {url}")
     print(f"Run output will be written under {output_base}/<job-id>/")
     print("Press Ctrl+C to stop.")
     if open_browser:

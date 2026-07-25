@@ -704,11 +704,12 @@ def parse_mashup_ui_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="soundweave mashup-ui",
         description=(
-            "Local web form for the mashup subcommand: paste YouTube URLs and "
-            "upload a cover image in a browser, then watch the run progress "
-            "live. Binds to 127.0.0.1 only and shells out to the same "
-            "'soundweave mashup' subcommand you'd run by hand — nothing "
-            "leaves this machine."
+            "Local web front-end for the mashup and loop subcommands: paste "
+            "YouTube URLs (or upload one audio file to repeat N times) in a "
+            "browser, then watch the run progress live. Binds to 127.0.0.1 "
+            "only and shells out to the same 'soundweave mashup'/'soundweave "
+            "loop' subcommands you'd run by hand — nothing leaves this "
+            "machine."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""

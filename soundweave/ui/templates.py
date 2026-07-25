@@ -16,9 +16,12 @@ INDEX_HTML = """<!doctype html>
   .mode-panel { margin-top: 8px; }
   button { margin-top: 24px; padding: 10px 20px; font-size: 15px; cursor: pointer; }
   .hint { color: #666; font-size: 13px; margin-top: 4px; }
+  .nav { font-size: 14px; margin-bottom: 16px; }
+  .nav span { color: #999; }
 </style>
 </head>
 <body>
+<div class="nav"><a href="/">Mashup</a> <span>|</span> <a href="/loop">Loop</a></div>
 <h1>Soundweave - Mashup</h1>
 <p class="hint">Paste YouTube URLs (one per line) and optionally add video.
 Runs locally via the existing <code>soundweave mashup</code> command - nothing leaves this machine.</p>
@@ -73,11 +76,58 @@ for (const radio of document.querySelectorAll('input[name="video_mode"]')) {
 </html>
 """
 
+LOOP_HTML = """<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Soundweave - Loop</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
+  label { display: block; margin-top: 16px; font-weight: 600; }
+  input[type=file], input[type=number] { margin-top: 4px; }
+  .row { display: flex; gap: 24px; align-items: center; margin-top: 12px; }
+  button { margin-top: 24px; padding: 10px 20px; font-size: 15px; cursor: pointer; }
+  .hint { color: #666; font-size: 13px; margin-top: 4px; }
+  .nav { font-size: 14px; margin-bottom: 16px; }
+  .nav span { color: #999; }
+</style>
+</head>
+<body>
+<div class="nav"><a href="/">Mashup</a> <span>|</span> <a href="/loop">Loop</a></div>
+<h1>Soundweave - Loop</h1>
+<p class="hint">Upload one audio file and repeat it N times with a silence gap between reps
+(e.g. for a 1-hour loop video). Runs locally via the existing <code>soundweave loop</code>
+command - nothing leaves this machine.</p>
+<form method="post" action="/run-loop" enctype="multipart/form-data">
+  <label for="audio">Audio file</label>
+  <input type="file" id="audio" name="audio" accept=".mp3,.wav,.m4a,.flac" required>
+
+  <div class="row">
+    <div>
+      <label for="count">Repeat count</label>
+      <input type="number" id="count" name="count" value="5" min="1" step="1" required>
+    </div>
+    <div>
+      <label for="gap_ms">Gap between reps (ms)</label>
+      <input type="number" id="gap_ms" name="gap_ms" value="3500" min="0" step="100">
+    </div>
+    <div>
+      <label for="trim_db">Trim threshold (dB)</label>
+      <input type="number" id="trim_db" name="trim_db" value="-40" step="1">
+    </div>
+  </div>
+
+  <button type="submit">Run loop</button>
+</form>
+</body>
+</html>
+"""
+
 JOB_HTML = """<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Soundweave - Mashup run</title>
+<title>Soundweave - Run</title>
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 16px; }
   pre { background: #111; color: #ddd; padding: 16px; border-radius: 6px; height: 480px;
@@ -89,7 +139,7 @@ JOB_HTML = """<!doctype html>
 </style>
 </head>
 <body>
-<h1>Mashup run</h1>
+<h1>Soundweave run</h1>
 <div id="status" class="running">Running...</div>
 <pre id="log"></pre>
 <script>

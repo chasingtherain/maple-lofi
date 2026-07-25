@@ -176,6 +176,84 @@ def download_audio(
     return expected_path
 
 
+def resolve_dry_run_tracklist(
+    config: MashupConfig, logger: logging.Logger
+) -> list[tuple[str, float]]:
+    """Resolve the final tracklist (title, duration) without downloading audio.
+
+    For --dry-run: lets a user sanity-check track order/titles/estimated
+    runtime for a urls.txt before committing to a full download + crossfade
+    + encode run. Mirrors download_stage()'s URL parsing, shuffle-if-
+    configured, and per-URL failure handling exactly (skip-with-warning
+    unless config.strict) — but only calls fetch_metadata() (yt-dlp
+    --dump-json --skip-download), never download_audio()/probe_audio_file().
+    No audio is downloaded and nothing is written to config.cache_dir.
+
+    Args:
+        config: Mashup configuration.
+        logger: Logger instance.
+
+    Returns:
+        Ordered list of (title, duration_s) tuples, one per successfully
+        resolved URL, in final play order (post-shuffle if config.shuffle).
+
+    Raises:
+        ValidationError: If inputs are invalid, if config.strict is set and a
+            URL fails, or if zero URLs resolve successfully.
+    """
+    logger.info("=== Dry Run: Resolve Tracklist ===")
+    logger.info(f"URLs file: {config.urls_file}")
+
+    validate_mashup_input(config)
+    logger.info("Input validation passed")
+
+    ytdlp_version = validate_ytdlp()
+    logger.info(f"yt-dlp version: {ytdlp_version}")
+
+    urls = parse_urls_file(config.urls_file)
+    logger.info(f"Parsed {len(urls)} URL(s) from {config.urls_file.name}")
+
+    ordered_urls = list(urls)
+    if config.shuffle:
+        logger.info("Shuffling URL order")
+        random.shuffle(ordered_urls)
+    else:
+        logger.info("Using urls.txt order as-listed (no shuffle)")
+
+    resolved: list[tuple[str, float]] = []
+
+    for i, url in enumerate(ordered_urls, start=1):
+        logger.info(f"[{i}/{len(ordered_urls)}] {url}")
+        try:
+            metadata = fetch_metadata(url, logger)
+            title = metadata.get("title") or metadata.get("id") or url
+            duration = metadata.get("duration")
+            if duration is None:
+                logger.warning(f"  yt-dlp metadata missing duration for {url}, using 0.0")
+                duration = 0.0
+            duration_s = float(duration)
+
+            logger.info(f"  Title:    {title}")
+            logger.info(f"  Duration: {duration_s:.1f}s")
+
+            resolved.append((title, duration_s))
+
+        except (YtDlpError, ValidationError) as e:
+            if config.strict:
+                raise ValidationError(f"Aborting (--strict): failed on {url}: {e}")
+            logger.warning(f"  Skipping {url}: {e}")
+            continue
+
+    if not resolved:
+        raise ValidationError("No tracks resolved successfully from urls.txt")
+
+    logger.info(
+        f"Dry-run resolution complete: {len(resolved)}/{len(ordered_urls)} track(s)"
+    )
+
+    return resolved
+
+
 def download_stage(config: MashupConfig, logger: logging.Logger) -> list[MashupTrack]:
     """Stage 0: Discover URLs and download audio + metadata for each.
 

@@ -6,6 +6,16 @@ held on screen for its own track's duration. See `video_sequence_stage()`,
 `match_images_to_tracks()`, and `calculate_sequence_duration()` below.
 Not yet wired into the CLI/pipeline -- callers construct the
 `(image_path, duration_s)` sequence by hand for now.
+
+Also provides on-video "now playing" track-title cards (T1): burns each
+track's title into the video at its actual start timestamp, fading in/out
+over the window built by `build_track_card_drawtext_filters()`
+(`soundweave.ffmpeg.commands`). This is an overlay layered onto whichever
+of the two video modes above is active (via `video_stage()`'s /
+`video_sequence_stage()`'s optional `track_cards`/`font_path` params), not
+a third mode -- see `write_track_card_text_files()` and
+`resolve_track_card_font()` below, and `cli.py`'s `--track-cards`/`--font`
+flags for how this is wired into the `mashup` subcommand.
 """
 
 import logging
@@ -13,16 +23,138 @@ import shutil
 from pathlib import Path
 
 from soundweave.config import PipelineConfig
-from soundweave.ffmpeg.commands import build_video_command, build_video_sequence_command
+from soundweave.ffmpeg.commands import (
+    build_track_card_drawtext_filters,
+    build_video_command,
+    build_video_sequence_command,
+)
 from soundweave.ffmpeg.executor import run_ffmpeg
 from soundweave.ffmpeg.probe import probe_audio_file
 from soundweave.utils.validators import ValidationError
+
+# Text files for each track-title card live under this subdirectory of the
+# run's output directory (e.g. output/track_cards/card_000.txt), one per
+# track -- kept on disk (not a tempdir that's cleaned up) so a user can
+# inspect exactly what text was burned in and when, consistent with this
+# project's "dual output" transparency convention (CLAUDE.md).
+TRACK_CARDS_SUBDIR = "track_cards"
+
+# Common macOS system font file locations to search, in priority order,
+# when --font isn't given. Arial.ttf first: a plain (non-collection) .ttf
+# is the simplest/most broadly compatible choice for FFmpeg's freetype
+# loader. Verified present and renderable via drawtext on this machine
+# (macOS, ffmpeg 8.0 built with --enable-libfreetype/--enable-libfontconfig).
+DEFAULT_FONT_CANDIDATES = [
+    Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+    Path("/System/Library/Fonts/Helvetica.ttc"),
+    Path("/System/Library/Fonts/SFNS.ttf"),
+    Path("/Library/Fonts/Arial.ttf"),
+]
+
+
+def resolve_track_card_font(explicit_font: Path | None = None) -> Path:
+    """Resolve a .ttf/.ttc/.otf font file for the --track-cards drawtext
+    overlay (T1).
+
+    Args:
+        explicit_font: Font path from --font, if given. Must exist.
+
+    Returns:
+        A font file path confirmed to exist on disk.
+
+    Raises:
+        ValidationError: If `explicit_font` is given but doesn't exist, or
+            (when not given) none of `DEFAULT_FONT_CANDIDATES` exist
+            either -- drawtext needs a real `fontfile=` to render with, so
+            this is a hard pre-flight failure rather than a silent
+            fallback to no text.
+    """
+    if explicit_font is not None:
+        if not explicit_font.is_file():
+            raise ValidationError(f"--font path not found: {explicit_font}")
+        return explicit_font
+
+    for candidate in DEFAULT_FONT_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+
+    searched = ", ".join(str(c) for c in DEFAULT_FONT_CANDIDATES)
+    raise ValidationError(
+        "No font available for --track-cards text rendering. Searched "
+        f"common macOS system font locations: {searched}. "
+        "Pass an explicit font file via --font /path/to/font.ttf."
+    )
+
+
+def write_track_card_text_files(
+    track_cards: list[tuple[str, float]],
+    output_dir: Path,
+) -> list[tuple[Path, float]]:
+    """Write one small text file per track title for drawtext's
+    ``textfile=`` mode (T1), paired with each track's start timestamp.
+
+    Real track titles routinely contain quotes/colons/percent signs (e.g.
+    ``Artist: "Track" (Live)``). Embedding that text directly into an
+    ffmpeg filtergraph `text=` value turned out to be unreliable in
+    practice (see `build_track_card_drawtext_filters()`'s docstring in
+    `soundweave.ffmpeg.commands` for the empirical findings) --
+    `textfile=` + `expansion=none` renders a file's raw bytes completely
+    literally instead, with zero filtergraph escaping needed for the
+    title text itself.
+
+    Args:
+        track_cards: Ordered list of (title, start_s) pairs -- e.g.
+            `[(clean_track_name(t.filename), start_s) for t, start_s in
+            zip(tracks, actual_timestamps)]` in `cli.py`'s mashup
+            subcommand, the same per-track timing data that already
+            drives `youtube_description.txt`.
+        output_dir: Run output directory; a `track_cards/` subdirectory
+            (`TRACK_CARDS_SUBDIR`) is created under it to hold the files.
+
+    Returns:
+        Ordered list of (text_file_path, start_s) pairs, ready for
+        `build_track_card_drawtext_filters()`.
+    """
+    cards_dir = output_dir / TRACK_CARDS_SUBDIR
+    cards_dir.mkdir(parents=True, exist_ok=True)
+
+    result = []
+    for i, (title, start_s) in enumerate(track_cards):
+        text_file = cards_dir / f"card_{i:03d}.txt"
+        text_file.write_text(title, encoding="utf-8")
+        result.append((text_file, start_s))
+
+    return result
+
+
+def _build_track_cards_filter(
+    track_cards: list[tuple[str, float]] | None,
+    font_path: Path | None,
+    output_dir: Path,
+    logger: logging.Logger,
+) -> str | None:
+    """Shared T1 wiring for `video_stage()`/`video_sequence_stage()`:
+    resolve a font, write per-track text files, and build the drawtext
+    filter fragment. Returns None (no-op) if `track_cards` is None/empty,
+    so callers can pass the result straight through to the existing
+    command builders' optional `track_cards_filter` param unchanged.
+    """
+    if not track_cards:
+        return None
+
+    resolved_font = resolve_track_card_font(font_path)
+    logger.info(f"Track cards: {len(track_cards)} title(s), font={resolved_font}")
+
+    card_files = write_track_card_text_files(track_cards, output_dir)
+    return build_track_card_drawtext_filters(card_files, resolved_font)
 
 
 def video_stage(
     audio_path: Path,
     config: PipelineConfig,
-    logger: logging.Logger
+    logger: logging.Logger,
+    track_cards: list[tuple[str, float]] | None = None,
+    font_path: Path | None = None,
 ) -> Path:
     """Stage 4: Render static video with static image.
 
@@ -30,6 +162,13 @@ def video_stage(
         audio_path: Path to final audio (merged.wav)
         config: Pipeline configuration
         logger: Logger instance
+        track_cards: Optional ordered list of (title, start_s) pairs for
+            T1's "now playing" track-title cards, burned into the video at
+            each track's start with a fade in/out. None (default) skips
+            the overlay entirely -- behavior is unchanged from before this
+            parameter existed.
+        font_path: Optional explicit font file for the overlay (see
+            `resolve_track_card_font()`). Ignored if `track_cards` is None.
 
     Returns:
         Path to final_video.mp4
@@ -41,6 +180,7 @@ def video_stage(
            - 1fps (minimal file size)
            - H.264 (yuv420p, high profile)
            - AAC audio (192kbps)
+           - Optional track-title card overlay (see `track_cards` above)
         4. Copy static image to output/thumbnail.{png,jpg}
 
     Output format:
@@ -65,12 +205,17 @@ def video_stage(
     # Build output path
     output_path = config.output_dir / "final_video.mp4"
 
+    track_cards_filter = _build_track_cards_filter(
+        track_cards, font_path, config.output_dir, logger
+    )
+
     # Build FFmpeg command
     command = build_video_command(
         audio_path,
         config.static_image,
         output_path,
-        duration_s
+        duration_s,
+        track_cards_filter=track_cards_filter,
     )
 
     # Execute
@@ -155,6 +300,8 @@ def video_sequence_stage(
     image_sequence: list[tuple[Path, float]],
     output_dir: Path,
     logger: logging.Logger,
+    track_cards: list[tuple[str, float]] | None = None,
+    font_path: Path | None = None,
 ) -> Path:
     """Stage 4 (alternate mode): render video with a per-track image swap.
 
@@ -165,17 +312,19 @@ def video_sequence_stage(
     the per-image durations. Does not change `video_stage()`'s behavior;
     this is an additive, independent entry point.
 
-    Not yet wired into the CLI: `image_sequence` must be built by the
-    caller (see `match_images_to_tracks()` to pair a raw image list with
-    per-track durations and get the pre-flight fewer-images-than-tracks
-    check for free).
-
     Args:
         audio_path: Path to final audio (merged.wav or merged.mp3)
         image_sequence: Ordered list of (image_path, duration_s) pairs, one
             per track. Must be non-empty.
         output_dir: Directory to write final_video.mp4 (and thumbnail) into
         logger: Logger instance
+        track_cards: Optional ordered list of (title, start_s) pairs for
+            T1's "now playing" track-title cards, burned into the video at
+            each track's start with a fade in/out. None (default) skips
+            the overlay entirely -- behavior is unchanged from before this
+            parameter existed.
+        font_path: Optional explicit font file for the overlay (see
+            `resolve_track_card_font()`). Ignored if `track_cards` is None.
 
     Returns:
         Path to final_video.mp4
@@ -212,7 +361,13 @@ def video_sequence_stage(
 
     output_path = output_dir / "final_video.mp4"
 
-    command = build_video_sequence_command(audio_path, image_sequence, output_path)
+    track_cards_filter = _build_track_cards_filter(
+        track_cards, font_path, output_dir, logger
+    )
+
+    command = build_video_sequence_command(
+        audio_path, image_sequence, output_path, track_cards_filter=track_cards_filter
+    )
 
     logger.info("Rendering video sequence (this may take a while for long audio)...")
     run_ffmpeg(

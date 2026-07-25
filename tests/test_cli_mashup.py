@@ -73,3 +73,33 @@ class TestParseMashupArgs:
                     "--image", "cover.png", "--images", "covers/",
                 ]
             )
+
+    def test_track_cards_and_font_default_off(self):
+        args = parse_mashup_args(["--urls", "urls.txt", "--output", "output"])
+        assert args.track_cards is False
+        assert args.font is None
+
+    def test_track_cards_flag(self):
+        args = parse_mashup_args(
+            ["--urls", "urls.txt", "--output", "output", "--track-cards"]
+        )
+        assert args.track_cards is True
+
+    def test_font_flag(self):
+        args = parse_mashup_args(
+            [
+                "--urls", "urls.txt", "--output", "output",
+                "--track-cards", "--font", "/path/to/font.ttf",
+            ]
+        )
+        assert args.font == Path("/path/to/font.ttf")
+
+    def test_font_flag_without_track_cards_is_allowed_by_parser(self):
+        """--font has no effect without --track-cards, but parsing itself
+        doesn't enforce that -- the mashup subcommand's runtime logic does
+        (font_path is only consulted when track_cards is truthy)."""
+        args = parse_mashup_args(
+            ["--urls", "urls.txt", "--output", "output", "--font", "/path/to/font.ttf"]
+        )
+        assert args.font == Path("/path/to/font.ttf")
+        assert args.track_cards is False

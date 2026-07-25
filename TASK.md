@@ -39,6 +39,27 @@ The original parallel-orchestration batch (T0-T3) plus its Tier 2 integration st
 
 **Acceptance**: a mashup run produces a video with visible, correctly-timed track-title overlays matching `youtube_description.txt`'s timestamps. Existing single-image/per-track-image video modes (`video_stage()`/`video_sequence_stage()`) unchanged in behavior when this feature is off.
 
+### T3 (ambient_bg): fix flower_sway.py duplication artifact
+
+**Status**: not started. Found 2026-07-25 immediately after `flower_sway.py` shipped (`ceab79d`) — the sway motion is real and correctly-scaled (see Addendum 3 above), but has a visible bug: a swayed flower leaves a duplicate behind at its original position instead of clearing it.
+
+**Owns**: `tools/ambient_bg/flower_sway.py` only.
+
+**Root cause (diagnosed, not yet fixed)**: `sway_frame()` does a backward warp — for each destination pixel it samples `frame[y, x-dx]` and blends using the mask value *at that source position*. This correctly paints flower color at a new position whenever some destination's backward-lookup lands on the original flower (the fix from Addendum 3). But it blends against `frame` itself — which still has the original flower baked in — as the "unmoved" background. Nothing ever clears the flower's *original* spot: that pixel's own backward-lookup usually points to grass (weight≈0 there), so the code leaves it unchanged, i.e. still showing the original flower. Net result: flower color painted at the new position **and** the untouched original left behind — visible duplication.
+
+**Proposed fix**: blend against a flower-removed background plate instead of the raw frame.
+1. Build a "background" version of the frame where the (dilated) flower mask region is infilled with a plausible grass estimate. Simplest approach to try first: heavily gaussian-blur the frame (sigma ~12-20px) and substitute the blurred version within the dilated mask region — blurred surrounding grass color should read as plausible fill for blobs this small. A proper inpaint (`cv2.inpaint` or `skimage.restoration.inpaint_biharmonic`) would look better but isn't an installed dependency yet — only reach for one if the blur fill looks bad on the real render, don't add it preemptively.
+2. Composite: `out = background*(1-weight) + warped*weight`, where `weight` is (as now) the mask sampled at the source position and `warped` samples the true (non-blurred) `frame` for the flower's actual sharp color — only the *background* layer changes, not where flower color itself comes from.
+3. Dilate the mask used for the background infill a few pixels beyond the sharp mask edge so there's no visible seam between infilled and original grass.
+
+**Verify before considering done** (same standard as the rest of this pipeline — don't just eyeball it):
+- Isolated single-frame test first (fast iteration, no need to re-render 600 frames while tuning): sway a static test frame at t=0 and a quarter-cycle later, crop to a known flower cluster, and confirm the *original* position now reads as grass-colored while the *new* position reads as flower-colored — not just "pixels changed," but that the specific duplication pattern is actually gone.
+- Numerically confirm: sample the original flower-center pixel's color at a displaced timestep and check it's closer to local grass color than to the original flower color (grass/flower HSV reference values are already recorded in `flower_sway.py`'s calibration constants from the first build).
+- Re-run the full pipeline (`depth_render.py` → `flower_sway.py` → `particles.py` → `composite.sh`) and reverify the loop seam is still clean via `composite.sh`'s built-in check (threshold 3.0/255) — infilling could interact with the loop boundary in a way the isolated test won't catch.
+- Visual check on the actual rendered `base.mp4`/`final.mp4` (not just the isolated single-frame test) at a couple of timestamps, same crop-and-compare approach used to catch the original bug.
+
+**Acceptance**: swaying flowers visibly relocate without a duplicate lingering at the original position, confirmed on the real rendered video — not just the isolated single-frame test that caught the original bug.
+
 ---
 
 ## T2: DepthFlow ambient background pipeline — full record (done, kept for reference)

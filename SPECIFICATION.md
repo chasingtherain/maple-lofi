@@ -1,8 +1,8 @@
-# Maple Lofi Project — Project Specification (v2)
+# Soundweave Project — Project Specification (v2)
 
 ## 1. Project Overview
 
-The Maple Lofi Project is a local, agent-driven audio + video production pipeline that converts multiple MapleStory background music tracks into a single, YouTube-ready lofi longplay.
+The Soundweave Project is a local, agent-driven audio + video production pipeline that converts multiple MapleStory background music tracks into a single, YouTube-ready lofi longplay.
 
 The system is designed to be:
 
@@ -234,12 +234,12 @@ ellinia.mp3  # Duplicates allowed - this will play ellinia twice
 
 **Minimal (audio only, with lofi)**:
 ```bash
-python -m maple_lofi --input input --output output
+python -m soundweave --input input --output output
 ```
 
 **Full (with video and custom assets)**:
 ```bash
-python -m maple_lofi \
+python -m soundweave \
   --input input \
   --output output \
   --cover assets/cover.png \
@@ -250,12 +250,12 @@ python -m maple_lofi \
 
 **Skip lofi (just merge tracks)**:
 ```bash
-python -m maple_lofi --input input --output output --skip-lofi
+python -m soundweave --input input --output output --skip-lofi
 ```
 
 **Audio with lofi, no video**:
 ```bash
-python -m maple_lofi \
+python -m soundweave \
   --input input \
   --output output \
   --texture assets/rain.wav \

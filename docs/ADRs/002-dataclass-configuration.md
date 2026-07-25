@@ -187,7 +187,7 @@ print(config)
 ### Implementation
 
 ```python
-# maple_lofi/config.py
+# soundweave/config.py
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -252,7 +252,7 @@ class PipelineConfig:
 ### Usage in CLI
 
 ```python
-# maple_lofi/cli.py
+# soundweave/cli.py
 
 def build_config(args: argparse.Namespace) -> PipelineConfig:
     """Convert CLI args to PipelineConfig."""
@@ -275,7 +275,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
 ### Usage in Stages
 
 ```python
-# maple_lofi/stages/merge.py
+# soundweave/stages/merge.py
 
 def merge_stage(tracks: List[AudioTrack], config: PipelineConfig, logger: Logger) -> Path:
     """Merge tracks with crossfades."""

@@ -176,7 +176,7 @@ class Pipeline:
 ### Structure
 
 ```
-maple_lofi/
+soundweave/
 ├── pipeline.py           # Pipeline class (orchestrator)
 ├── stages/
 │   ├── ingest.py         # Stage 1: def ingest_stage(...)

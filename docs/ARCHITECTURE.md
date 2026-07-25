@@ -2,7 +2,7 @@
 
 ## System Design
 
-The Maple Lofi Pipeline is a **command-line audio/video processing pipeline** that transforms a collection of music tracks into a single, lofi-styled YouTube-ready video. It follows a **linear 4-stage architecture** with emphasis on:
+The Soundweave Pipeline is a **command-line audio/video processing pipeline** that transforms a collection of music tracks into a single, lofi-styled YouTube-ready video. It follows a **linear 4-stage architecture** with emphasis on:
 
 - **Determinism**: Same inputs → same outputs (reproducible builds)
 - **Auditability**: Full command logging + SHA256 checksums
@@ -89,7 +89,7 @@ Both are written to the output directory for every run.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         CLI Layer                           │
-│  (maple_lofi/cli.py, __main__.py)                          │
+│  (soundweave/cli.py, __main__.py)                          │
 │                                                             │
 │  • Parse arguments (argparse)                              │
 │  • Run pre-flight validators                               │
@@ -99,7 +99,7 @@ Both are written to the output directory for every run.
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                    Pipeline Orchestrator                    │
-│  (maple_lofi/pipeline.py)                                  │
+│  (soundweave/pipeline.py)                                  │
 │                                                             │
 │  class Pipeline:                                           │
 │      def run() -> int:                                     │
@@ -118,7 +118,7 @@ Both are written to the output directory for every run.
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                      Stage Modules                          │
-│  (maple_lofi/stages/*.py)                                  │
+│  (soundweave/stages/*.py)                                  │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │ Stage 1: Ingest (ingest.py)                        │  │
@@ -159,7 +159,7 @@ Both are written to the output directory for every run.
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                    FFmpeg Abstraction                       │
-│  (maple_lofi/ffmpeg/*.py)                                  │
+│  (soundweave/ffmpeg/*.py)                                  │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │ executor.py                                         │  │
@@ -186,7 +186,7 @@ Both are written to the output directory for every run.
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                    Utilities & Logging                      │
-│  (maple_lofi/utils/*.py, maple_lofi/logging/*.py)         │
+│  (soundweave/utils/*.py, soundweave/logging/*.py)         │
 │                                                             │
 │  • validators.py: Pre-flight checks                        │
 │  • natural_sort.py: Filename sorting                       │
@@ -401,9 +401,9 @@ Copy-paste to reproduce issues.
 ## File Structure
 
 ```
-maple_lofi/
+soundweave/
 ├── __init__.py              # Package marker
-├── __main__.py              # Entry point (python -m maple_lofi)
+├── __main__.py              # Entry point (python -m soundweave)
 ├── cli.py                   # Argument parsing, pre-flight
 ├── pipeline.py              # Orchestrator
 ├── config.py                # PipelineConfig dataclass
@@ -433,7 +433,7 @@ maple_lofi/
 
 ## Comparison to Alternatives
 
-| Feature | Maple Lofi | pydub | ffmpeg-python | Audacity scripting |
+| Feature | Soundweave | pydub | ffmpeg-python | Audacity scripting |
 |---------|-----------|-------|---------------|-------------------|
 | Dependency count | 0 | 1 | 1 | 0 |
 | Reproducibility | Full | Partial | Full | Manual |
@@ -457,7 +457,7 @@ maple_lofi/
 
 ## Conclusion
 
-The Maple Lofi Pipeline prioritizes **simplicity, reproducibility, and educational clarity** over maximum performance or features. It demonstrates:
+The Soundweave Pipeline prioritizes **simplicity, reproducibility, and educational clarity** over maximum performance or features. It demonstrates:
 
 - Clean architecture with pure functions
 - Proper separation of concerns (CLI → Orchestrator → Stages → FFmpeg)

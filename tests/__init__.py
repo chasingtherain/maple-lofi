@@ -1,1 +1,1 @@
-"""Tests for Maple Lofi pipeline."""
+"""Tests for Soundweave pipeline."""

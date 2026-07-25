@@ -113,7 +113,7 @@ output/
 
 **run_log.txt** (human-readable):
 ```
-=== Maple Lofi Pipeline ===
+=== Soundweave Pipeline ===
 Run ID: 550e8400-e29b-41d4-a716-446655440000
 Timestamp: 2025-01-15T10:23:45Z
 
@@ -208,7 +208,7 @@ Running FFmpeg command:
 #### run_log.txt (Logger)
 
 ```python
-# maple_lofi/logging/logger.py
+# soundweave/logging/logger.py
 
 import logging
 from pathlib import Path
@@ -222,7 +222,7 @@ def setup_logger(log_file: Path) -> logging.Logger:
     Returns:
         Logger instance
     """
-    logger = logging.getLogger("maple_lofi")
+    logger = logging.getLogger("soundweave")
     logger.setLevel(logging.INFO)
 
     # Console handler (for interactive use)
@@ -253,7 +253,7 @@ logger.debug(f"Track details: {tracks}")  # Only in file, not console
 #### manifest.json (ManifestBuilder)
 
 ```python
-# maple_lofi/logging/manifest.py
+# soundweave/logging/manifest.py
 
 @dataclass
 class ManifestBuilder:

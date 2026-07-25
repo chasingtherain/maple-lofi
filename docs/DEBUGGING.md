@@ -1,6 +1,6 @@
 # Debugging Guide
 
-This guide helps you debug common issues in the Maple Lofi Pipeline.
+This guide helps you debug common issues in the Soundweave Pipeline.
 
 ## Quick Diagnosis
 
@@ -155,7 +155,7 @@ ffmpeg -i output/merged_lofi.wav -af volumedetect -f null - 2>&1 | grep max_volu
 
 1. **Reduce texture gain**:
    ```bash
-   python3 -m maple_lofi \
+   python3 -m soundweave \
      --input input \
      --output output \
      --texture rain.wav \
@@ -164,7 +164,7 @@ ffmpeg -i output/merged_lofi.wav -af volumedetect -f null - 2>&1 | grep max_volu
 
 2. **Reduce drums gain**:
    ```bash
-   python3 -m maple_lofi \
+   python3 -m soundweave \
      --input input \
      --output output \
      --drums drums.wav \
@@ -233,13 +233,13 @@ ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:no
 
 ```bash
 # Short crossfades (0.5s)
-python3 -m maple_lofi \
+python3 -m soundweave \
   --input input \
   --output output \
   --fade-ms 500
 
 # Long crossfades (30s)
-python3 -m maple_lofi \
+python3 -m soundweave \
   --input input \
   --output output \
   --fade-ms 30000
@@ -311,13 +311,13 @@ Processing 60 minutes of audio takes 20+ minutes.
 
 1. **Skip video** if you only need audio:
    ```bash
-   python3 -m maple_lofi --input input --output output
+   python3 -m soundweave --input input --output output
    # No --cover = no video rendering
    ```
 
 2. **Skip lofi** for testing:
    ```bash
-   python3 -m maple_lofi --input input --output output --skip-lofi
+   python3 -m soundweave --input input --output output --skip-lofi
    # Only merge, no processing
    ```
 
@@ -410,7 +410,7 @@ grep "ffmpeg.*cover.*final_video" output/run_log.txt
 
 ### Enable Debug Logging
 
-Modify `maple_lofi/logging/logger.py` to enable DEBUG level:
+Modify `soundweave/logging/logger.py` to enable DEBUG level:
 
 ```python
 console_handler.setLevel(logging.DEBUG)  # Was INFO
@@ -471,9 +471,9 @@ You can test stages independently:
 
 ```python
 # Test ingest only
-from maple_lofi.config import PipelineConfig
-from maple_lofi.stages.ingest import ingest_stage
-from maple_lofi.logging.logger import setup_logger
+from soundweave.config import PipelineConfig
+from soundweave.stages.ingest import ingest_stage
+from soundweave.logging.logger import setup_logger
 
 config = PipelineConfig(input_dir=Path("input"), output_dir=Path("output"))
 logger = setup_logger(Path("test.log"))
@@ -504,7 +504,7 @@ If you're stuck:
 
 Check exit code:
 ```bash
-python3 -m maple_lofi --input input --output output
+python3 -m soundweave --input input --output output
 echo "Exit code: $?"
 ```
 

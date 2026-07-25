@@ -1,4 +1,4 @@
-# Testing Guide for Maple Lofi Pipeline
+# Testing Guide for Soundweave Pipeline
 
 ## Quick Start: Synthetic Test (5 minutes)
 
@@ -20,7 +20,7 @@ This creates:
 ### Step 2: Run Minimal Test (Audio Only)
 
 ```bash
-python3 -m maple_lofi --input test_input --output test_output
+python3 -m soundweave --input test_input --output test_output
 ```
 
 **Expected:**
@@ -34,7 +34,7 @@ python3 -m maple_lofi --input test_input --output test_output
 ### Step 3: Run Full Test (With Video)
 
 ```bash
-python3 -m maple_lofi \
+python3 -m soundweave \
   --input test_input \
   --output test_output \
   --cover test_assets/cover.png \
@@ -136,7 +136,7 @@ EOF
 ### Run Real Pipeline
 
 ```bash
-python3 -m maple_lofi \
+python3 -m soundweave \
   --input real_input \
   --output real_output \
   --cover real_assets/cover.png \
@@ -155,7 +155,7 @@ Test stages incrementally to isolate issues:
 
 ```bash
 # Run pipeline, it will fail after ingest but you'll see track discovery
-python3 -m maple_lofi --input test_input --output test_output --skip-lofi 2>&1 | head -20
+python3 -m soundweave --input test_input --output test_output --skip-lofi 2>&1 | head -20
 ```
 
 Check: Do all tracks get discovered? Is order correct?
@@ -163,7 +163,7 @@ Check: Do all tracks get discovered? Is order correct?
 ### Test 2: Merge Only (Skip Lofi)
 
 ```bash
-python3 -m maple_lofi --input test_input --output test_output --skip-lofi
+python3 -m soundweave --input test_input --output test_output --skip-lofi
 ```
 
 Check: Does `merged_clean.wav` sound smooth? No pops/clicks at transitions?
@@ -171,7 +171,7 @@ Check: Does `merged_clean.wav` sound smooth? No pops/clicks at transitions?
 ### Test 3: Lofi (No Assets)
 
 ```bash
-python3 -m maple_lofi --input test_input --output test_output
+python3 -m soundweave --input test_input --output test_output
 ```
 
 Check: Does lofi processing work? Is there clipping? (Open in Audacity to check waveform)
@@ -179,7 +179,7 @@ Check: Does lofi processing work? Is there clipping? (Open in Audacity to check 
 ### Test 4: Lofi (With Texture Only)
 
 ```bash
-python3 -m maple_lofi \
+python3 -m soundweave \
   --input test_input \
   --output test_output \
   --texture test_assets/rain.wav
@@ -190,7 +190,7 @@ Check: Can you hear rain in background? Is music still audible?
 ### Test 5: Full Pipeline
 
 ```bash
-python3 -m maple_lofi \
+python3 -m soundweave \
   --input test_input \
   --output test_output \
   --cover test_assets/cover.png \

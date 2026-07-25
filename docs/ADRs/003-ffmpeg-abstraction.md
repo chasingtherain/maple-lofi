@@ -32,7 +32,7 @@ Where should FFmpeg command construction and execution logic live?
 Put FFmpeg commands directly in stage functions:
 
 ```python
-# maple_lofi/stages/merge.py
+# soundweave/stages/merge.py
 
 def merge_stage(tracks, config, logger):
     # Build command inline
@@ -73,7 +73,7 @@ def merge_stage(tracks, config, logger):
 Create helper functions at the bottom of each stage file:
 
 ```python
-# maple_lofi/stages/merge.py
+# soundweave/stages/merge.py
 
 def merge_stage(tracks, config, logger):
     cmd = _build_merge_command(tracks, config)
@@ -103,7 +103,7 @@ def _run_ffmpeg(cmd, logger):
 Create a separate module for all FFmpeg operations:
 
 ```
-maple_lofi/
+soundweave/
 ├── ffmpeg/
 │   ├── __init__.py
 │   ├── commands.py    # Command builders
@@ -112,7 +112,7 @@ maple_lofi/
 ```
 
 ```python
-# maple_lofi/ffmpeg/commands.py
+# soundweave/ffmpeg/commands.py
 
 def build_merge_command(
     tracks: List[AudioTrack],
@@ -136,7 +136,7 @@ def build_merge_command(
     return cmd
 
 
-# maple_lofi/ffmpeg/executor.py
+# soundweave/ffmpeg/executor.py
 
 def run_ffmpeg(
     command: List[str],
@@ -177,8 +177,8 @@ def run_ffmpeg(
 
 # Usage in stages
 
-from maple_lofi.ffmpeg.commands import build_merge_command
-from maple_lofi.ffmpeg.executor import run_ffmpeg
+from soundweave.ffmpeg.commands import build_merge_command
+from soundweave.ffmpeg.executor import run_ffmpeg
 
 def merge_stage(tracks, config, logger):
     cmd = build_merge_command(tracks, crossfade_durations, output)
@@ -205,7 +205,7 @@ def merge_stage(tracks, config, logger):
 ### Structure
 
 ```
-maple_lofi/ffmpeg/
+soundweave/ffmpeg/
 ├── __init__.py
 ├── commands.py       # Pure functions that build FFmpeg commands
 ├── executor.py       # run_ffmpeg() - subprocess wrapper with logging
@@ -390,8 +390,8 @@ def run_ffmpeg(command, logger, ...):
 3. **Execute via run_ffmpeg()**:
    ```python
    # In stage
-   from maple_lofi.ffmpeg.commands import build_new_command
-   from maple_lofi.ffmpeg.executor import run_ffmpeg
+   from soundweave.ffmpeg.commands import build_new_command
+   from soundweave.ffmpeg.executor import run_ffmpeg
 
    cmd = build_new_command(inputs, output)
    run_ffmpeg(cmd, logger, description="What this does")

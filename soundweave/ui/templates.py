@@ -11,20 +11,40 @@ INDEX_HTML = """<!doctype html>
   label { display: block; margin-top: 16px; font-weight: 600; }
   input[type=file], input[type=number] { margin-top: 4px; }
   .row { display: flex; gap: 24px; align-items: center; margin-top: 12px; }
+  .mode-row { display: flex; gap: 20px; align-items: center; margin-top: 8px; font-weight: 400; }
+  .mode-row label { display: inline-flex; align-items: center; gap: 6px; margin-top: 0; font-weight: 400; }
+  .mode-panel { margin-top: 8px; }
   button { margin-top: 24px; padding: 10px 20px; font-size: 15px; cursor: pointer; }
   .hint { color: #666; font-size: 13px; margin-top: 4px; }
 </style>
 </head>
 <body>
 <h1>Soundweave - Mashup</h1>
-<p class="hint">Paste YouTube URLs (one per line) and optionally upload a cover image.
+<p class="hint">Paste YouTube URLs (one per line) and optionally add video.
 Runs locally via the existing <code>soundweave mashup</code> command - nothing leaves this machine.</p>
 <form method="post" action="/run" enctype="multipart/form-data">
   <label for="urls">YouTube URLs</label>
   <textarea id="urls" name="urls" placeholder="https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=...&#10;# comments and blank lines are fine" required></textarea>
 
-  <label for="image">Cover image (optional)</label>
-  <input type="file" id="image" name="image" accept="image/png,image/jpeg">
+  <label>Video (optional)</label>
+  <div class="mode-row">
+    <label><input type="radio" name="video_mode" value="image" checked> Single cover image</label>
+    <label><input type="radio" name="video_mode" value="images"> Per-track images</label>
+    <label><input type="radio" name="video_mode" value="animated_background"> Animated background</label>
+  </div>
+
+  <div class="mode-panel" id="panel-image">
+    <input type="file" id="image" name="image" accept="image/png,image/jpeg">
+    <p class="hint">One image, shown for the whole video.</p>
+  </div>
+  <div class="mode-panel" id="panel-images" style="display:none">
+    <input type="file" id="images" name="images" accept="image/png,image/jpeg" multiple>
+    <p class="hint">One image per track (select all at once) - shown in filename order, one per track, for that track's actual duration. Needs at least as many images as tracks.</p>
+  </div>
+  <div class="mode-panel" id="panel-animated_background" style="display:none">
+    <input type="file" id="animated_background" name="animated_background" accept="video/mp4">
+    <p class="hint">A short, seamlessly-looping video (e.g. tools/ambient_bg/composite.sh's output) - looped to cover the full audio duration.</p>
+  </div>
 
   <div class="row">
     <div>
@@ -39,6 +59,16 @@ Runs locally via the existing <code>soundweave mashup</code> command - nothing l
 
   <button type="submit">Run mashup</button>
 </form>
+<script>
+const panels = { image: "panel-image", images: "panel-images", animated_background: "panel-animated_background" };
+for (const radio of document.querySelectorAll('input[name="video_mode"]')) {
+  radio.addEventListener("change", () => {
+    for (const [mode, panelId] of Object.entries(panels)) {
+      document.getElementById(panelId).style.display = (mode === radio.value) ? "" : "none";
+    }
+  });
+}
+</script>
 </body>
 </html>
 """

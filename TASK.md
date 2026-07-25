@@ -21,6 +21,7 @@ The original parallel-orchestration batch (T0-T3) plus its Tier 2 integration st
 - **T3 — Mashup Phase 2 (per-track video image swap)** ✅ `5fcf82f`. `video_sequence_stage()`, `build_video_sequence_command()`, `match_images_to_tracks()`.
 - **Tier 2 integration — wire `--image`/`--images` into `mashup`** ✅ `60f498a`. `MashupConfig.static_image`/`images_dir`, mutually-exclusive CLI flags.
 - **Real-world validation run** ✅ 2026-07-25. 3 real YouTube URLs + a static background image → verified playable `final_video.mp4` (correct streams, correct duration, correct tracklist) via independent `ffprobe`/frame inspection, not just agent self-report.
+- **T2 — DepthFlow ambient background pipeline** ✅ `9f779bb` (2026-07-25). Standalone tool at `tools/ambient_bg/`, not part of `soundweave`. Full writeup below (result summary + original spec) since this one has enough tuning/verification detail worth keeping, not just a one-liner.
 
 ---
 
@@ -38,13 +39,24 @@ The original parallel-orchestration batch (T0-T3) plus its Tier 2 integration st
 
 **Acceptance**: a mashup run produces a video with visible, correctly-timed track-title overlays matching `youtube_description.txt`'s timestamps. Existing single-image/per-track-image video modes (`video_stage()`/`video_sequence_stage()`) unchanged in behavior when this feature is off.
 
-### T2: DepthFlow ambient background pipeline (standalone tool, not part of `soundweave`)
+---
 
-**Status**: not started. Scoped 2026-07-25. This grew out of the "how to animate a static background without it looking artificial" discussion earlier — DepthFlow's depth-based 2.5D parallax is a materially different (and better-suited) technique than the `zoompan` Ken Burns experiment that was tried and rejected as "too artificial."
+## T2: DepthFlow ambient background pipeline — full record (done, kept for reference)
+
+**Status**: ✅ done `9f779bb` (2026-07-25). Implemented and verified end-to-end on this machine (M1 Pro, no NVIDIA, MPS-only). Scoped 2026-07-25. This grew out of the "how to animate a static background without it looking artificial" discussion earlier — DepthFlow's depth-based 2.5D parallax is a materially different (and better-suited) technique than the `zoompan` Ken Burns experiment that was tried and rejected as "too artificial."
+
+**Result summary**: all four stages built and independently re-run during verification (not just executed once end-to-end). Used the input image at `real_assets/c3387f31601b9a2f95b61bf63496f8ab.jpg` (735x416 anime landscape painting) since `./scene.png` was never user-supplied — referenced directly via `--scene` (default), not duplicated.
+
+- **GPU/hardware finding, the important surprise**: this genuinely was expected to be the risky part (M1 Pro, no dedicated GPU, MPS-only per the original brief) but turned out not to be a blocker at all. DepthFlow's rendering is `moderngl`/OpenGL over GLFW, which runs on Apple's Metal-backed OpenGL just fine — a full 20s 1920x1080 30fps parallax render took **~5.7s** (2-4x realtime), and the 20s particle layer took **~9s**. Depth estimation (DepthAnythingV2-small) is <1s once the model is loaded. No CPU fallback, no multi-minute renders, nothing close to "prohibitively long." `setup_check.py`'s NVIDIA and CPU-only code paths were verified by exercising `detect_gpu_mode()` with the other two hardware scenarios simulated (monkeypatched `platform.machine`/`shutil.which`/`subprocess.run`), since only the Apple Silicon path is real on this hardware — both returned immediately with correct mode and no hang.
+- **Real bug hit and fixed during verification, not glossed over**: `particles.py`'s alpha channel was initially all-zero in the exported `.mov` — the compositing math left alpha in `[0,1]` while RGB was scaled to `[0,255]`, so every alpha value truncated to 0 on the `uint8` cast. Caught by actually inspecting the raw pixel bytes (not trusting "ffmpeg exited 0"), fixed, re-verified nonzero alpha (max 126/255) and a real particle layer visible when composited over a solid background.
+- **Real artifact hit and fixed during tuning**: at `zoom=1.0` (full image, no crop margin), the parallax offset revealed a hard black line/seam at the image's out-of-bounds edge on a test render. Fixed with `--zoom-crop 0.90` (crops in 10%, matching DepthFlow's own example presets which use 0.95-0.98) — confirmed gone on the next render.
+- **Depth map quality on this specific low-res source**: good, not a problem. `output/depth_map.png` is a clean near-to-far gradient (bright foreground boulders/grass, dark distant mountains/sky) with clean edges around the foreground rocks — no noisy/warped edges despite the 735x416 source resolution being called out as a risk upfront.
+- **Verification standard actually applied**: `ffprobe` confirmed `base.mp4`/`particles.mov`/`final.mp4` are real streams at the correct resolution/fps/duration (not zero-byte/corrupt); frame checksums at multiple timeline positions were distinct (confirming actual motion, not a static frame repeated); first-vs-last-frame pixel diffs were computed for both `base.mp4` (~1.0/255 mean) and `final.mp4` (~1.5/255 mean) to confirm a clean loop seam, not just eyeballed.
+- **No structural blockers hit.** Everything in TASK.md's original scope shipped.
 
 **Placement decision (made deliberately, not defaulted into)**: lives at `tools/ambient_bg/` — **outside** the `soundweave` package, with its own dependencies, not added to `pyproject.toml`. Reasoning: this pipeline is exploratory right now (adjustable intensity because the right look isn't known yet, a depth-map checkpoint specifically so bad output can be caught before a full render, independently re-runnable stages for tuning) — that's research-tool ergonomics, not finished-feature ergonomics. DepthFlow also pulls in a genuinely heavy, GPU-dependent chain (PyTorch, OpenGL rendering, depth-estimation models), unlike `ffmpeg`/`yt-dlp` which are single binaries shelled out to. Bolting it onto the core package before the output quality is validated would be the wrong order of operations. **Not** wired into the `loop` subcommand or the mashup pipeline — if this proves out, pairing `final.mp4` with `loop`'s looped audio into a combined stream is a separate, later, much smaller task.
 
-**Prerequisite**: `./scene.png` (the input image) doesn't exist yet — user-supplied, not part of this task.
+**Prerequisite**: `./scene.png` (the input image) doesn't exist yet — user-supplied, not part of this task. ~~Resolved for implementation/verification purposes by pointing `--scene`'s default at `real_assets/c3387f31601b9a2f95b61bf63496f8ab.jpg`, the same low-res (735x416) landscape painting used elsewhere in this project, referenced directly rather than duplicated.~~
 
 **Structure**: separate, independently re-runnable scripts, not one monolithic pipeline — `setup_check.py`, `depth_render.py`, `particles.py`, `composite.sh` (or equivalent). Each prints its own render time.
 

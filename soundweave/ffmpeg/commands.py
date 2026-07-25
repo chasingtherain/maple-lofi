@@ -219,6 +219,88 @@ def build_loop_command(
     return cmd
 
 
+def build_video_sequence_command(
+    audio_path: Path,
+    image_sequence: list[tuple[Path, float]],
+    output_path: Path,
+) -> list[str]:
+    """Build FFmpeg command for rendering a per-track image-swap video.
+
+    Companion to `build_video_command()` for the mashup "per-track images"
+    mode (PRD.md §7): rather than one static image for the whole runtime,
+    each image in `image_sequence` is shown for its own duration, in order,
+    then hard-cut to the next. Total video duration is the sum of the
+    per-image durations, matched against the audio track.
+
+    Args:
+        audio_path: Path to final audio (merged.wav or merged.mp3)
+        image_sequence: Ordered list of (image_path, duration_s) pairs, one
+            per track. Must be non-empty.
+        output_path: Path for output MP4
+
+    Returns:
+        FFmpeg command as list of arguments
+
+    Raises:
+        ValueError: If image_sequence is empty
+
+    FFmpeg approach:
+        - Each image is its own looped input, trimmed to its own duration
+          via per-input `-t` (so ffmpeg only ever decodes/holds exactly as
+          many frames as needed, rather than trimming after the fact)
+        - Each image input is scaled/padded/letterboxed to 1920x1080 and
+          normalized to 1fps, then concatenated (hard cut, no crossfade)
+          via the `concat` filter
+        - Audio is the final input, mapped straight through untouched
+        - Output: H.264 (yuv420p, high profile), AAC audio (192kbps)
+    """
+    if not image_sequence:
+        raise ValueError("Cannot build video sequence command with zero images")
+
+    cmd = ["ffmpeg"]
+
+    # One looped, duration-trimmed input per image
+    for image_path, duration_s in image_sequence:
+        cmd.extend(["-loop", "1", "-t", str(duration_s), "-i", str(image_path)])
+
+    # Audio is the last input
+    audio_input_index = len(image_sequence)
+    cmd.extend(["-i", str(audio_path)])
+
+    # Per-image scale/pad/fps normalization, then concat
+    filter_parts = []
+    concat_labels = []
+    for i in range(len(image_sequence)):
+        filter_parts.append(
+            f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
+            f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=1[v{i}]"
+        )
+        concat_labels.append(f"[v{i}]")
+
+    filter_parts.append(
+        "".join(concat_labels) + f"concat=n={len(image_sequence)}:v=1:a=0[outv]"
+    )
+    filter_complex = ";".join(filter_parts)
+
+    cmd.extend(["-filter_complex", filter_complex])
+    cmd.extend([
+        "-map", "[outv]",                # Concatenated video
+        "-map", f"{audio_input_index}:a",  # Audio passthrough
+        "-c:v", "libx264",               # H.264 codec
+        "-preset", "medium",             # Encoding preset
+        "-crf", "18",                    # Quality (lower = better, 18 is visually lossless)
+        "-pix_fmt", "yuv420p",           # Pixel format for compatibility
+        "-profile:v", "high",            # H.264 profile
+        "-c:a", "aac",                   # AAC audio codec
+        "-b:a", "192k",                  # Audio bitrate
+        "-shortest",                     # Stop when shortest input ends
+        "-y",                            # Overwrite output
+        str(output_path)
+    ])
+
+    return cmd
+
+
 def build_video_command(
     audio_path: Path,
     cover_image: Path,

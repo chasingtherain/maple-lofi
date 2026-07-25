@@ -79,7 +79,8 @@ def video_stage(
         command,
         logger,
         description="Video rendering with static image",
-        timeout=None
+        timeout=None,
+        total_duration_s=duration_s,
     )
 
     video_size_mb = output_path.stat().st_size / (1024 ** 2)
@@ -219,7 +220,8 @@ def video_sequence_stage(
         command,
         logger,
         description="Video rendering with per-track image sequence",
-        timeout=None
+        timeout=None,
+        total_duration_s=total_duration_s,
     )
 
     video_size_mb = output_path.stat().st_size / (1024 ** 2)

@@ -120,6 +120,105 @@ def build_mp3_command(
     ]
 
 
+def build_loop_command(
+    input_file: Path,
+    output_path: Path,
+    count: int,
+    gap_s: float,
+    fade_s: float = 0.5,
+    trim_db: float = -40.0,
+    sample_rate: int = 48000,
+) -> list[str]:
+    """Build FFmpeg command to loop a single audio file N times.
+
+    Each repetition has its quiet tail trimmed, then gets a fade-in at the
+    start and a fade-out at the end. Between repetitions a silence segment
+    is inserted.
+
+    Args:
+        input_file:   Path to the audio input file.
+        output_path:  Path for the output MP3.
+        count:        Number of times to play the file (>= 1).
+        gap_s:        Silence between repetitions in seconds.
+        fade_s:       Fade-in/out duration per repetition in seconds.
+        trim_db:      dB threshold for trailing silence removal (e.g. -40.0).
+                      Audio below this level at the end of each rep is removed
+                      before the gap is inserted.
+        sample_rate:  Sample rate for silence generation (default 48000).
+
+    Returns:
+        FFmpeg command as a list of argument strings.
+
+    Raises:
+        ValueError: If count < 1.
+
+    Filter strategy per repetition:
+        silenceremove  — trims trailing audio below trim_db
+        afade=t=in     — fade in the start
+        areverse       — reverse the stream
+        afade=t=in     — fade in from the new start (= fade out original end)
+        areverse       — reverse back to original order
+
+    The areverse trick applies a fade-out without needing to know the
+    post-trim duration, since silenceremove changes it dynamically.
+
+    Segment concat:
+        N reps + N-1 silence segments → concat=n=<2N-1>:v=0:a=1
+        N=1 special case: no silence, no concat — [rep0] mapped directly.
+    """
+    if count < 1:
+        raise ValueError(f"count must be >= 1, got {count}")
+
+    cmd = ["ffmpeg"]
+    for _ in range(count):
+        cmd.extend(["-i", str(input_file)])
+
+    filter_parts = []
+
+    for i in range(count):
+        filter_parts.append(
+            f"[{i}:a]"
+            f"silenceremove=stop_periods=1:stop_duration=0.5:stop_threshold={trim_db}dB,"
+            f"afade=t=in:st=0:d={fade_s:.6f},"
+            f"areverse,"
+            f"afade=t=in:st=0:d={fade_s:.6f},"
+            f"areverse"
+            f"[rep{i}]"
+        )
+
+    if count == 1:
+        filter_complex = filter_parts[0]
+        final_label = "rep0"
+    else:
+        for i in range(count - 1):
+            filter_parts.append(
+                f"aevalsrc=0:c=stereo:s={sample_rate}:d={gap_s:.6f}[sil{i}]"
+            )
+
+        concat_inputs = ""
+        for i in range(count - 1):
+            concat_inputs += f"[rep{i}][sil{i}]"
+        concat_inputs += f"[rep{count - 1}]"
+
+        n_segments = 2 * count - 1
+        filter_parts.append(
+            f"{concat_inputs}concat=n={n_segments}:v=0:a=1[out]"
+        )
+        filter_complex = ";".join(filter_parts)
+        final_label = "out"
+
+    cmd.extend(["-filter_complex", filter_complex])
+    cmd.extend(["-map", f"[{final_label}]"])
+    cmd.extend([
+        "-codec:a", "libmp3lame",
+        "-b:a", "320k",
+        "-y",
+        str(output_path),
+    ])
+
+    return cmd
+
+
 def build_video_command(
     audio_path: Path,
     cover_image: Path,

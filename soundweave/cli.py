@@ -146,12 +146,142 @@ def run_preflight_checks(config: PipelineConfig) -> None:
     print("All pre-flight checks passed!\n")
 
 
+def parse_loop_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments for the 'loop' subcommand.
+
+    Args:
+        argv: Argument list (defaults to sys.argv[2:] — after the 'loop' token).
+
+    Returns:
+        Parsed namespace with: input_file, count, gap_ms, output.
+    """
+    parser = argparse.ArgumentParser(
+        prog="soundweave loop",
+        description="Loop a single audio file N times with fade/silence between reps.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Loop mysong.mp3 five times with default 3.5s gap
+  soundweave loop mysong.mp3 --count 5
+
+  # Custom gap of 4 seconds
+  soundweave loop mysong.mp3 --count 3 --gap-ms 4000
+
+  # Write output to a specific directory
+  soundweave loop mysong.mp3 --count 10 --output /tmp/looped
+
+Output filename: <stem>_x<N>.mp3  (e.g. mysong_x5.mp3)
+        """
+    )
+
+    parser.add_argument(
+        "input_file",
+        type=Path,
+        help="Audio file to loop (.mp3, .wav, .m4a, .flac)"
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        required=True,
+        help="Number of times to play the file (must be >= 1)"
+    )
+    parser.add_argument(
+        "--gap-ms",
+        type=int,
+        default=3500,
+        dest="gap_ms",
+        help="Silence between repetitions in milliseconds (default: 3500)"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output directory (default: same directory as input file)"
+    )
+    parser.add_argument(
+        "--trim-db",
+        type=float,
+        default=-40.0,
+        dest="trim_db",
+        help=(
+            "dB threshold for trimming the quiet tail of each repetition "
+            "before inserting the gap (default: -40). "
+            "Raises the threshold to trim more of a gradual wind-down, "
+            "e.g. --trim-db -25."
+        )
+    )
+
+    return parser.parse_args(argv)
+
+
+def _run_loop_subcommand(argv: list[str]) -> int:
+    """Handle the 'loop' subcommand.
+
+    Args:
+        argv: Arguments after the 'loop' token (i.e. sys.argv[2:]).
+
+    Returns:
+        Exit code.
+    """
+    from soundweave.ffmpeg.executor import ProcessingError
+    from soundweave.logging.logger import setup_logger
+    from soundweave.loop_config import LoopConfig
+    from soundweave.stages.loop import loop_stage
+
+    try:
+        args = parse_loop_args(argv)
+        config = LoopConfig(
+            input_file=args.input_file,
+            count=args.count,
+            gap_ms=args.gap_ms,
+            output_dir=args.output,
+            trim_db=args.trim_db,
+        )
+
+        logger = setup_logger(config.output_dir / "loop_log.txt")
+
+        logger.info("=" * 60)
+        logger.info("Soundweave - Loop Subcommand")
+        logger.info("=" * 60)
+        logger.info(f"Run ID:    {config.run_id}")
+        logger.info(f"Timestamp: {config.timestamp}")
+        logger.info("")
+
+        output_path = loop_stage(config, logger)
+
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("Loop completed successfully!")
+        logger.info(f"Output: {output_path}")
+        logger.info("=" * 60)
+
+        return 0
+
+    except ValidationError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    except ProcessingError as e:
+        print(f"PROCESSING ERROR: {e}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\nInterrupted by user", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"UNEXPECTED ERROR: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 2
+
+
 def main() -> int:
     """Main CLI entry point.
 
     Returns:
         Exit code (0=success, 1=validation error, 2=processing error, 3=output error)
     """
+    if len(sys.argv) > 1 and sys.argv[1] == "loop":
+        return _run_loop_subcommand(sys.argv[2:])
+
     try:
         args = parse_args()
         config = build_config(args)

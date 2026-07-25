@@ -192,10 +192,11 @@ def render_particles(args: argparse.Namespace) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--count", type=int, default=200,
-                         help="Number of particles (default: 200. Originally defaulted to 90/low density, "
-                              "but real-world feedback was the layer was invisible in practice - raised "
-                              "alongside radius/opacity below.")
+    parser.add_argument("--count", type=int, default=100,
+                         help="Number of particles (default: 100. Went 90 -> 200 -> too many per "
+                              "real-world feedback -> 100, while keeping the larger radius/opacity "
+                              "from the same round of tuning - it was particle size, not count, that "
+                              "mainly fixed visibility.")
     parser.add_argument("--duration", type=float, default=20.0, help="Loop duration in seconds (must match depth_render.py's --duration to composite cleanly).")
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--width", type=int, default=1920)

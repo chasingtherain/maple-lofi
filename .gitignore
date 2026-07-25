@@ -48,3 +48,6 @@ real_output/
 
 # Output directories (user-generated)
 output/
+
+# yt-dlp download cache (mashup subcommand)
+.cache/

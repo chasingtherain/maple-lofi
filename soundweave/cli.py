@@ -273,6 +273,209 @@ def _run_loop_subcommand(argv: list[str]) -> int:
         return 2
 
 
+def parse_mashup_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse arguments for the 'mashup' subcommand.
+
+    Args:
+        argv: Argument list (defaults to sys.argv[2:] — after the 'mashup' token).
+
+    Returns:
+        Parsed namespace with: urls, output, fade_ms, shuffle, strict, cache_dir.
+    """
+    from soundweave.mashup_config import DEFAULT_FADE_MS
+
+    parser = argparse.ArgumentParser(
+        prog="soundweave mashup",
+        description=(
+            "Download audio from a list of YouTube URLs and crossfade them "
+            "into one longplay (reuses the existing merge/MP3 pipeline)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Download & merge, tracks played in the order listed in urls.txt
+  soundweave mashup --urls urls.txt --output output
+
+  # Randomize order instead of using the listed order
+  soundweave mashup --urls urls.txt --output output --shuffle
+
+  # Custom crossfade duration
+  soundweave mashup --urls urls.txt --output output --fade-ms 5000
+
+  # Abort on the first unavailable/failed URL instead of skipping it
+  soundweave mashup --urls urls.txt --output output --strict
+
+urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
+(same convention as order.txt).
+        """
+    )
+
+    parser.add_argument(
+        "--urls",
+        type=Path,
+        required=True,
+        help="Path to urls.txt (one YouTube URL per line)"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Directory for output files"
+    )
+    parser.add_argument(
+        "--fade-ms",
+        type=int,
+        default=DEFAULT_FADE_MS,
+        dest="fade_ms",
+        help=f"Crossfade duration in milliseconds (default: {DEFAULT_FADE_MS} = 4.5 seconds)"
+    )
+    parser.add_argument(
+        "--shuffle",
+        action="store_true",
+        help="Randomize track order (default: play in the order listed in urls.txt)"
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Abort the run on the first failed/unavailable URL instead of "
+            "skipping it with a warning"
+        )
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        dest="cache_dir",
+        help="Directory for cached yt-dlp downloads, keyed by video ID (default: .cache/youtube)"
+    )
+
+    return parser.parse_args(argv)
+
+
+def _run_mashup_subcommand(argv: list[str]) -> int:
+    """Handle the 'mashup' subcommand.
+
+    Args:
+        argv: Arguments after the 'mashup' token (i.e. sys.argv[2:]).
+
+    Returns:
+        Exit code.
+    """
+    from soundweave.ffmpeg.commands import build_mp3_command
+    from soundweave.ffmpeg.executor import ProcessingError, run_ffmpeg
+    from soundweave.ffmpeg.probe import probe_loudnorm_duration
+    from soundweave.logging.logger import setup_logger
+    from soundweave.mashup_config import MashupConfig
+    from soundweave.stages.download import download_stage
+    from soundweave.stages.merge import merge_stage
+    from soundweave.utils.youtube import write_youtube_description
+    from soundweave.ytdlp.executor import YtDlpError
+
+    try:
+        args = parse_mashup_args(argv)
+        config = MashupConfig(
+            urls_file=args.urls,
+            output_dir=args.output,
+            fade_ms=args.fade_ms,
+            shuffle=args.shuffle,
+            strict=args.strict,
+            cache_dir=args.cache_dir,
+        )
+
+        logger = setup_logger(config.output_dir / "mashup_log.txt")
+
+        logger.info("=" * 60)
+        logger.info("Soundweave - Mashup Subcommand")
+        logger.info("=" * 60)
+        logger.info(f"Run ID:    {config.run_id}")
+        logger.info(f"Timestamp: {config.timestamp}")
+        logger.info("")
+
+        # Stage 0: Download (new)
+        tracks = download_stage(config, logger)
+        logger.info("")
+
+        # Stage 2: Merge with crossfades (reused, unmodified)
+        merged_clean = merge_stage(tracks, config, logger)
+        logger.info("")
+
+        # Stage 3: MP3 encoding & YouTube timestamps (reused pattern from
+        # pipeline.py's inline Stage 3 — same commands, same accurate
+        # post-loudnorm timestamp measurement)
+        logger.info("=== Stage 3: MP3 Encoding & YouTube Timestamps ===")
+
+        merged_mp3 = config.output_dir / "merged.mp3"
+        mp3_cmd = build_mp3_command(merged_clean, merged_mp3)
+
+        logger.info("Encoding to MP3 (320kbps)...")
+        run_ffmpeg(mp3_cmd, logger, description="MP3 encoding (320kbps CBR)", timeout=None)
+
+        mp3_size_mb = merged_mp3.stat().st_size / (1024 ** 2)
+        logger.info(f"  {merged_mp3.name} ({mp3_size_mb:.1f}MB)")
+
+        crossfade_s = config.fade_ms / 1000.0
+        description_path = config.output_dir / "youtube_description.txt"
+
+        logger.info("Measuring actual track durations (post-loudnorm)...")
+        actual_timestamps = [0.0]
+        current_time = 0.0
+
+        for i, track in enumerate(tracks):
+            try:
+                actual_duration = probe_loudnorm_duration(track.path)
+                diff = actual_duration - track.duration_s
+                logger.info(
+                    f"  [{i + 1}] {track.filename}: "
+                    f"{track.duration_s:.2f}s -> {actual_duration:.2f}s "
+                    f"({'+' if diff >= 0 else ''}{diff:.2f}s)"
+                )
+                if i < len(tracks) - 1:
+                    current_time += actual_duration - crossfade_s
+                    actual_timestamps.append(current_time)
+            except Exception as e:
+                logger.warning(f"  Failed to measure {track.filename}: {e}")
+                if i < len(tracks) - 1:
+                    current_time += track.duration_s - crossfade_s
+                    actual_timestamps.append(current_time)
+
+        logger.info("Generating YouTube timestamps...")
+        write_youtube_description(
+            description_path,
+            tracks,
+            crossfade_s,
+            title="Tracklist",
+            actual_timestamps=(
+                actual_timestamps if len(actual_timestamps) == len(tracks) else None
+            ),
+        )
+        logger.info(f"  {description_path.name}")
+
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("Mashup completed successfully!")
+        logger.info(f"Output:      {merged_mp3}")
+        logger.info(f"Description: {description_path}")
+        logger.info("=" * 60)
+
+        return 0
+
+    except ValidationError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    except (ProcessingError, YtDlpError) as e:
+        print(f"PROCESSING ERROR: {e}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\nInterrupted by user", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"UNEXPECTED ERROR: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 2
+
+
 def main() -> int:
     """Main CLI entry point.
 
@@ -281,6 +484,9 @@ def main() -> int:
     """
     if len(sys.argv) > 1 and sys.argv[1] == "loop":
         return _run_loop_subcommand(sys.argv[2:])
+
+    if len(sys.argv) > 1 and sys.argv[1] == "mashup":
+        return _run_mashup_subcommand(sys.argv[2:])
 
     try:
         args = parse_args()

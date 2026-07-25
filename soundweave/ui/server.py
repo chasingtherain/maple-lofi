@@ -28,7 +28,7 @@ from soundweave.mashup_config import DEFAULT_FADE_MS
 from soundweave.ui.templates import INDEX_HTML, JOB_HTML
 
 _LOG_TAIL_BYTES = 60_000
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def _parse_multipart(content_type: str, body: bytes) -> dict[str, list[Message]]:

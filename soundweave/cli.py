@@ -471,7 +471,7 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     )
     from soundweave.ytdlp.executor import YtDlpError
 
-    _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+    _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
     try:
         args = parse_mashup_args(argv)

@@ -34,11 +34,11 @@ Runs locally via the existing <code>soundweave mashup</code> command - nothing l
   </div>
 
   <div class="mode-panel" id="panel-image">
-    <input type="file" id="image" name="image" accept="image/png,image/jpeg">
+    <input type="file" id="image" name="image" accept="image/png,image/jpeg,image/webp">
     <p class="hint">One image, shown for the whole video.</p>
   </div>
   <div class="mode-panel" id="panel-images" style="display:none">
-    <input type="file" id="images" name="images" accept="image/png,image/jpeg" multiple>
+    <input type="file" id="images" name="images" accept="image/png,image/jpeg,image/webp" multiple>
     <p class="hint">One image per track (select all at once) - shown in filename order, one per track, for that track's actual duration. Needs at least as many images as tracks.</p>
   </div>
   <div class="mode-panel" id="panel-animated_background" style="display:none">

@@ -9,7 +9,6 @@ from soundweave.ffmpeg.probe import probe_audio_file
 from soundweave.utils.natural_sort import natural_sort
 from soundweave.utils.validators import ValidationError
 
-
 # Supported audio file extensions
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".mpeg"}
 
@@ -171,7 +170,7 @@ def determine_track_order(
     available_filenames = {f.name for f in audio_files}
 
     if order_file.exists():
-        logger.info(f"Using order.txt for track ordering")
+        logger.info("Using order.txt for track ordering")
         ordered_filenames = parse_order_file(order_file)
         validate_ordering(ordered_filenames, available_filenames, logger)
         return ordered_filenames

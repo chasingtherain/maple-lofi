@@ -5,7 +5,6 @@ from pathlib import Path
 
 from soundweave.stages.ingest import AudioTrack
 
-
 _AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac", ".mpeg"}
 
 

@@ -43,7 +43,8 @@ class ManifestBuilder:
                 ["ffmpeg", "-version"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                check=False
             )
             # Extract first line (e.g., "ffmpeg version 4.4.2...")
             first_line = result.stdout.split("\n")[0]

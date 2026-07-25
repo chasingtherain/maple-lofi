@@ -28,6 +28,16 @@ target-version = ["py310"]
 line-length = 100
 target-version = "py310"
 
+[tool.ruff.lint]
+# BLE001 (blind except Exception) and S110 (except-pass without logging) are
+# disabled project-wide: every current site is either a top-level CLI/pipeline
+# error boundary that must catch anything to guarantee an exit code, or a
+# deliberate best-effort side operation (disk-space estimate, FFmpeg version
+# string, per-track duration probe) that should degrade rather than crash the
+# run. Narrowing these would break the documented exit-code contract in
+# docs/ARCHITECTURE.md, not improve it.
+ignore = ["BLE001", "S110"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

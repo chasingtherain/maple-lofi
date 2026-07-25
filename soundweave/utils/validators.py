@@ -1,6 +1,5 @@
 """Pre-flight validation checks for the pipeline."""
 
-import platform
 import re
 import subprocess
 import sys
@@ -9,7 +8,6 @@ from pathlib import Path
 
 class ValidationError(Exception):
     """Raised when validation fails (exit code 1)."""
-    pass
 
 
 def validate_python_version() -> None:
@@ -39,7 +37,8 @@ def validate_ffmpeg() -> str:
             ["ffmpeg", "-version"],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            check=False
         )
 
         if result.returncode != 0:

@@ -1,6 +1,5 @@
 """Main pipeline orchestration."""
 
-import logging
 import time
 from pathlib import Path
 
@@ -19,7 +18,6 @@ from soundweave.utils.youtube import write_youtube_description
 
 class OutputError(Exception):
     """Raised when output operations fail (exit code 3)."""
-    pass
 
 
 class Pipeline:
@@ -200,7 +198,7 @@ class Pipeline:
             self.logger.info(f"Output directory: {self.config.output_dir}")
             self.logger.info("")
             self.logger.info("Outputs:")
-            for name, data in self.manifest.data["outputs"].items():
+            for data in self.manifest.data["outputs"].values():
                 path = Path(data["path"])
                 self.logger.info(f"  ✓ {path.name} ({data['file_size_mb']}MB)")
 

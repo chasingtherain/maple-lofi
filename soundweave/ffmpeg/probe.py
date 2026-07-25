@@ -44,7 +44,8 @@ def probe_audio_file(file_path: Path) -> AudioMetadata:
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            check=False
         )
 
         if result.returncode != 0:
@@ -135,7 +136,8 @@ def probe_loudnorm_duration(file_path: Path) -> float:
                 "-"
             ],
             capture_output=True,
-            timeout=120  # Allow up to 2 minutes per track
+            timeout=120,  # Allow up to 2 minutes per track
+            check=False
         )
 
         if result.returncode != 0:
@@ -194,7 +196,8 @@ def detect_track_boundaries(
             ],
             capture_output=True,
             text=True,
-            timeout=600  # Allow up to 10 minutes for long files
+            timeout=600,  # Allow up to 10 minutes for long files
+            check=False
         )
 
         # Parse silence_start timestamps from stderr

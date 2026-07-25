@@ -2,12 +2,10 @@
 
 import logging
 import subprocess
-from pathlib import Path
 
 
 class ProcessingError(Exception):
     """Raised when FFmpeg processing fails (exit code 2)."""
-    pass
 
 
 def run_ffmpeg(
@@ -39,7 +37,8 @@ def run_ffmpeg(
             command,
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            check=False
         )
 
         # Check exit code

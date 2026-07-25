@@ -3,7 +3,6 @@
 import logging
 import sys
 from pathlib import Path
-from typing import TextIO
 
 
 def setup_logger(log_file: Path) -> logging.Logger:

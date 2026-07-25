@@ -1,0 +1,22 @@
+# tools/ambient_bg/ - standalone, deliberately NOT part of soundweave's pyproject.toml.
+# See TASK.md T2 for why: exploratory research tool with a heavy GPU-dependent
+# dependency chain (PyTorch, OpenGL rendering, depth-estimation models),
+# unlike soundweave's stdlib-only + shelled-out-ffmpeg/yt-dlp approach.
+#
+# Setup:
+#   python3 -m venv tools/ambient_bg/.venv
+#   tools/ambient_bg/.venv/bin/pip install -r tools/ambient_bg/requirements.txt
+#
+# Also requires `ffmpeg` on PATH (external binary, not a pip package - see
+# setup_check.py, which verifies this and everything else below).
+
+# github.com/BrokenSource/DepthFlow - NOT depthflow.io (unrelated paid SaaS
+# product that happens to share a name). setup_check.py verifies the
+# installed package resolves to the right project via PyPI Project-URL
+# metadata before anything else runs.
+depthflow==1.0.0
+
+# numpy/pillow come in transitively via depthflow, but particles.py imports
+# them directly, so pinning them as explicit top-level requirements here too.
+numpy>=2.0
+pillow>=11.0

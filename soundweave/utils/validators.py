@@ -126,7 +126,7 @@ def estimate_disk_space_needed(input_dir: Path) -> int:
         for file_path in input_dir.glob(f"*{ext}"):
             total_size += file_path.stat().st_size
 
-    # Estimate: merged_clean.wav + merged_lofi.wav + merged_lofi.mp3 + video
+    # Estimate: merged_clean.wav + merged.mp3 + video
     # Rule of thumb: 3x input size
     return total_size * 3
 

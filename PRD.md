@@ -69,11 +69,11 @@ soundweave mashup --urls urls.txt --output output                   # audio only
 - Automatic copyright/Content-ID risk assessment. **Flagging as a real risk, not a feature**: downloading and re-uploading commercial copyrighted music to YouTube will very likely trigger Content ID claims (muting/monetization redirect, not necessarily a strike, but worth knowing going in). This is a usage risk for the user, not something the tool should try to solve — recommend treating outputs as personal-use/unlisted unless the user has rights to the material.
 - Resumable/partial-failure re-runs (nice-to-have, not blocking).
 
-## 9. Housekeeping to do alongside (pre-existing drift, unrelated to this feature but worth fixing before piling more on top)
+## 9. Housekeeping (done)
 
-- **`SPECIFICATION.md` is stale**: it documents a Stage 3 "Lofi Transformation" (texture/drums/EQ/compression) that no longer exists anywhere in `soundweave/` — it was removed in the `ca155e6` refactor but the spec, `docs/ARCHITECTURE.md`, and several docstrings (`stages/__init__.py`, `manifest.py`, `validators.py`) still reference it. Recommend reconciling docs to match actual code before adding the mashup feature, so the docs stay trustworthy.
-- Several untracked `test_*/` directories at the repo root (`test_covers/`, `test_fixed_lofi/`, `test_minimal/`, `test_per_track_tempo/`, `test_refactor/`, `test_saturation/`) aren't covered by `.gitignore` (only `test_input/`, `test_output/`, `test_assets/` are). Worth adding a `test_*/` glob or cleaning these up so `git status` stays readable.
-- There's already uncommitted work in progress on the `loop` subcommand (`cli.py`, `ffmpeg/commands.py`, `loop_config.py`, `stages/loop.py`, plus doc updates) — not touching that, just flagging so it's not confused with mashup-related changes when reviewing diffs later.
+- **Lofi scope dropped entirely.** `SPECIFICATION.md`, `TESTING_GUIDE.md`, and `docs/PIPELINE_CONTRACT.md` described a lofi-processing stage (texture/drums mixing, EQ, compression) that no longer exists in code. Rather than reconcile them, they were deleted — lofi is not a direction this project is pursuing; the scope is strictly stitching tracks together (crossfade/loudnorm/encode) plus optional video. `docs/ARCHITECTURE.md`/`docs/DEBUGGING.md` were trimmed to match reality instead of deleted, since most of their content is still accurate. See `CLAUDE.md`'s "Non-goals" section.
+- `.gitignore` now uses a `test_*/` glob instead of enumerating specific test-output directories.
+- The `loop` subcommand work-in-progress has been committed (it was already complete, just uncommitted).
 
 ## 10. Phased plan
 

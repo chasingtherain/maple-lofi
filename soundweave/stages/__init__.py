@@ -1,1 +1,1 @@
-"""Pipeline stages: ingest, merge, lofi, video."""
+"""Pipeline stages: ingest, merge, video."""

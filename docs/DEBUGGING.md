@@ -146,40 +146,23 @@ Audio sounds distorted or has pops/clicks.
 
 ```bash
 # Use FFmpeg volumedetect filter
-ffmpeg -i output/merged_lofi.wav -af volumedetect -f null - 2>&1 | grep max_volume
+ffmpeg -i output/merged_clean.wav -af volumedetect -f null - 2>&1 | grep max_volume
 
 # If max_volume is close to 0.0 dB, you have clipping
 ```
 
 **Solutions**:
 
-1. **Reduce texture gain**:
+1. **Check input files** — a hot/over-loud source track can still clip after loudnorm in edge cases:
    ```bash
-   python3 -m soundweave \
-     --input input \
-     --output output \
-     --texture rain.wav \
-     --texture-gain -30  # Default is -26, try -30
-   ```
-
-2. **Reduce drums gain**:
-   ```bash
-   python3 -m soundweave \
-     --input input \
-     --output output \
-     --drums drums.wav \
-     --drums-gain -26  # Default is -22, try -26
-   ```
-
-3. **Check input files**:
-   ```bash
-   # Check each input track
    for f in input/*.mp3; do
      ffmpeg -i "$f" -af volumedetect -f null - 2>&1 | grep max_volume
    done
    ```
 
-**Root cause**: Usually hot input files or too much gain on texture/drums.
+2. **Re-run with a different `--fade-ms`** — overlapping loud sections during a crossfade can sum above 0dB; a shorter or longer crossfade changes what overlaps.
+
+**Root cause**: Usually a hot input file rather than the crossfade/loudnorm logic itself.
 
 ---
 
@@ -188,7 +171,7 @@ ffmpeg -i output/merged_lofi.wav -af volumedetect -f null - 2>&1 | grep max_volu
 **Symptom**:
 ```bash
 # Audio is 10:30, but video is 10:29 or 10:31
-ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 output/merged_lofi.wav
+ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 output/merged_clean.wav
 # 630.5
 
 ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 output/final_video.mp4
@@ -204,7 +187,7 @@ ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:no
    cat output/manifest.json | python3 -c "
    import json, sys
    m = json.load(sys.stdin)
-   print(f\"Audio: {m['outputs']['merged_lofi_wav']['duration_s']}s\")
+   print(f\"Audio: {m['outputs']['merged_clean']['duration_s']}s\")
    print(f\"Video: {m['outputs']['final_video']['duration_s']}s\")
    "
    ```
@@ -212,10 +195,10 @@ ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:no
 2. **Re-render video manually**:
    ```bash
    # Get exact audio duration
-   DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 output/merged_lofi.wav)
+   DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 output/merged_clean.wav)
 
    # Render video with exact duration
-   ffmpeg -loop 1 -i cover.png -i output/merged_lofi.wav \
+   ffmpeg -loop 1 -i cover.png -i output/merged_clean.wav \
      -c:v libx264 -c:a aac -b:a 192k -r 1 -t $DURATION -y output/final_video.mp4
    ```
 
@@ -245,9 +228,9 @@ python3 -m soundweave \
   --fade-ms 30000
 ```
 
-**Default**: 15000ms (15 seconds)
+**Default**: 3000ms (3 seconds)
 
-**Recommendation**: 500-1000ms for minimal overlap, 10000-20000ms for smooth blending.
+**Recommendation**: 500-1000ms for minimal overlap between distinct songs, 4000-5000ms for a smoother song-to-song blend (see `PRD.md` for the mashup default of 4500ms), 10000ms+ for a DJ-style continuous mix.
 
 ---
 
@@ -269,13 +252,13 @@ ls -lh output/
 
 1. **Use MP3 for final output** (automatically created):
    ```bash
-   # merged_lofi.mp3 is much smaller
-   ls -lh output/merged_lofi.mp3
+   # merged.mp3 is much smaller
+   ls -lh output/merged.mp3
    ```
 
-2. **Delete intermediate WAV files** if disk space is tight:
+2. **Delete the intermediate WAV file** if disk space is tight:
    ```bash
-   rm output/merged_clean.wav  # Keep merged_lofi.mp3 and final_video.mp4
+   rm output/merged_clean.wav  # Keep merged.mp3 and final_video.mp4
    ```
 
 **Do NOT compress WAV files** - they are intermediate lossless files.
@@ -301,27 +284,20 @@ Processing 60 minutes of audio takes 20+ minutes.
    - 1fps video still means rendering thousands of frames
    - For 60 min audio: ~3600 frames at 1fps
 
-2. **Lofi processing** (Stage 3): Medium
-   - Loudness normalization is computationally expensive
+2. **Merge** (Stage 2): Medium
+   - Loudness normalization per track is computationally expensive
 
-3. **Merge** (Stage 2): Fast
-   - Crossfading is relatively quick
+3. **Ingest** (Stage 1) and **MP3 encoding** (Stage 3): Fast
 
 **Solutions**:
 
 1. **Skip video** if you only need audio:
    ```bash
    python3 -m soundweave --input input --output output
-   # No --cover = no video rendering
+   # No --image = no video rendering
    ```
 
-2. **Skip lofi** for testing:
-   ```bash
-   python3 -m soundweave --input input --output output --skip-lofi
-   # Only merge, no processing
-   ```
-
-3. **Use faster machine** or **wait longer** (it's doing a lot of work!)
+2. **Use faster machine** or **wait longer** (it's doing a lot of work!)
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## System Design
 
-The Soundweave Pipeline is a **command-line audio/video processing pipeline** that transforms a collection of music tracks into a single, lofi-styled YouTube-ready video. It follows a **linear 4-stage architecture** with emphasis on:
+The Soundweave Pipeline is a **command-line audio/video processing pipeline** that stitches a collection of music tracks into a single, continuous, crossfaded YouTube-ready video. It follows a **linear 4-stage architecture** with emphasis on:
 
 - **Determinism**: Same inputs → same outputs (reproducible builds)
 - **Auditability**: Full command logging + SHA256 checksums
@@ -24,12 +24,11 @@ track3.mp3 ──┘           │
                          │               ↑
                          │               └─ Loudness normalized, crossfaded
                          ▼
-rain.wav ────┐
-drums.wav ───┤──▶ [Stage 3: Lofi] ──▶ merged_lofi.wav + merged_lofi.mp3
-             │           │               ↑
-             │           │               └─ EQ, compression, texture mixing
-             ▼           ▼
-cover.png ──▶ [Stage 4: Video] ──▶ final_video.mp4 + thumbnail.png
+                  [Stage 3: Encoding] ──▶ merged.mp3 (320kbps) + youtube_description.txt
+                         │               ↑
+                         │               └─ MP3 encode + chapter timestamps
+                         ▼
+image.png ──▶ [Stage 4: Video] ──▶ final_video.mp4 + thumbnail.png
                          │               ↑
                          │               └─ 1920x1080, 1fps, AAC audio
                          ▼
@@ -70,9 +69,10 @@ All pipeline parameters are captured in a single **`PipelineConfig` dataclass**:
 class PipelineConfig:
     input_dir: Path
     output_dir: Path
-    fade_ms: int = 15000
-    highpass_hz: int = 35
-    # ... 10+ parameters
+    static_image: Path | None = None
+    fade_ms: int = 3000
+    num_tracks: int | None = None
+    shuffle: bool = True
 ```
 
 This config flows through all stages, ensuring consistency.
@@ -105,7 +105,7 @@ Both are written to the output directory for every run.
 │      def run() -> int:                                     │
 │          1. Execute Stage 1: Ingest                        │
 │          2. Execute Stage 2: Merge                         │
-│          3. Execute Stage 3: Lofi (optional)              │
+│          3. Execute Stage 3: MP3 Encoding + Timestamps     │
 │          4. Execute Stage 4: Video (optional)             │
 │          5. Write manifest.json                            │
 │          6. Return exit code (0-3)                         │
@@ -137,22 +137,19 @@ Both are written to the output directory for every run.
 │  └─────────────────────────────────────────────────────┘  │
 │                            ↓                                │
 │  ┌─────────────────────────────────────────────────────┐  │
-│  │ Stage 3: Lofi (lofi.py)                            │  │
-│  │ • Mix texture (rain) at -26dB                       │  │
-│  │ • Mix drums at -22dB (delayed start)                │  │
-│  │ • Apply EQ (highpass 35Hz, lowpass 11kHz)          │  │
-│  │ • Compress (3:1 ratio, -18dB threshold)            │  │
-│  │ • Limit (-1dB ceiling)                              │  │
+│  │ Stage 3: MP3 Encoding + Timestamps (in pipeline.py) │  │
 │  │ • Encode MP3 (320kbps CBR)                          │  │
-│  │ → Returns: Path to merged_lofi.wav                 │  │
+│  │ • Measure actual post-loudnorm track durations      │  │
+│  │ • Generate YouTube chapter timestamps               │  │
+│  │ → Returns: Path to merged.mp3                       │  │
 │  └─────────────────────────────────────────────────────┘  │
 │                            ↓                                │
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │ Stage 4: Video (video.py)                          │  │
 │  │ • Probe audio duration                              │  │
-│  │ • Scale/pad cover to 1920x1080 (letterbox)         │  │
+│  │ • Scale/pad image to 1920x1080 (letterbox)         │  │
 │  │ • Render video (1fps, H.264, AAC)                  │  │
-│  │ • Copy cover as thumbnail                           │  │
+│  │ • Copy image as thumbnail                           │  │
 │  │ → Returns: Path to final_video.mp4                 │  │
 │  └─────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -172,8 +169,8 @@ Both are written to the output directory for every run.
 │  ┌─────────────────────────────────────────────────────┐  │
 │  │ commands.py                                         │  │
 │  │ • build_merge_command(tracks, durations)           │  │
-│  │ • build_lofi_command(input, config)                │  │
-│  │ • build_video_command(audio, cover, duration)      │  │
+│  │ • build_mp3_command(input, output)                 │  │
+│  │ • build_video_command(audio, image, duration)      │  │
 │  │ → Returns: List[str] (FFmpeg command)              │  │
 │  └─────────────────────────────────────────────────────┘  │
 │                                                             │
@@ -208,10 +205,9 @@ Each stage can **fail independently** without corrupting state:
 
 ### Optional Stages
 
-Stages 3 and 4 are **optional** based on flags:
+Stage 4 is **optional** based on flags:
 
-- `--skip-lofi`: Skip Stage 3 (merge only)
-- No `--cover`: Skip Stage 4 (audio only)
+- No `--image`: Skip Stage 4 (audio only)
 
 This allows incremental testing and flexible workflows.
 
@@ -261,7 +257,7 @@ Dominated by FFmpeg operations:
 
 - **Stage 1 (Ingest)**: O(n) file probes (~1s per file)
 - **Stage 2 (Merge)**: O(n) audio processing (~0.5× real-time)
-- **Stage 3 (Lofi)**: O(1) relative to merge (similar duration)
+- **Stage 3 (Encoding)**: O(1) relative to merge (MP3 encode + duration probes)
 - **Stage 4 (Video)**: O(duration) at 1fps (~6 min for 60 min audio)
 
 **Bottleneck**: Video rendering (Stage 4) for long audio.
@@ -279,8 +275,7 @@ Dominated by FFmpeg operations:
 **Estimate**: 3× input size
 
 - `merged_clean.wav`: ~10MB/min (48kHz, 16-bit)
-- `merged_lofi.wav`: ~10MB/min (same format)
-- `merged_lofi.mp3`: ~2.4MB/min (320kbps)
+- `merged.mp3`: ~2.4MB/min (320kbps)
 - `final_video.mp4`: ~0.5-1MB/min (1fps, H.264)
 
 ## Extension Points
@@ -292,7 +287,7 @@ The architecture supports these extensions without major refactoring:
 Add new stages between existing ones:
 
 ```python
-# After merge, before lofi:
+# After merge, before encoding:
 mastered = mastering_stage(merged_clean, config, logger)
 ```
 
@@ -301,8 +296,8 @@ mastered = mastering_stage(merged_clean, config, logger)
 Modify `commands.py` to add filters:
 
 ```python
-# Add reverb to lofi stage:
-filter_parts.append("[lp]aecho=0.8:0.88:60:0.4[reverb]")
+# Add a different crossfade curve to the merge stage:
+filter_parts.append("acrossfade=d=4.5:c1=exp:c2=exp")
 ```
 
 ### 3. Alternative Output Formats
@@ -311,7 +306,7 @@ Add new output formats in Stage 3/4:
 
 ```python
 # Export FLAC alongside MP3:
-build_flac_command(merged_lofi_wav, output_flac_path)
+build_flac_command(merged_clean_wav, output_flac_path)
 ```
 
 ### 4. Parallel Processing
@@ -404,15 +399,16 @@ Copy-paste to reproduce issues.
 soundweave/
 ├── __init__.py              # Package marker
 ├── __main__.py              # Entry point (python -m soundweave)
-├── cli.py                   # Argument parsing, pre-flight
-├── pipeline.py              # Orchestrator
+├── cli.py                   # Argument parsing, pre-flight, subcommand dispatch
+├── pipeline.py              # Orchestrator (main pipeline)
 ├── config.py                # PipelineConfig dataclass
+├── loop_config.py           # LoopConfig dataclass (loop subcommand)
 │
 ├── stages/
 │   ├── ingest.py            # Stage 1
 │   ├── merge.py             # Stage 2
-│   ├── lofi.py              # Stage 3
-│   └── video.py             # Stage 4
+│   ├── video.py             # Stage 4 (Stage 3 - encoding - is inline in pipeline.py)
+│   └── loop.py              # `loop` subcommand (not part of the main pipeline)
 │
 ├── ffmpeg/
 │   ├── executor.py          # subprocess wrapper
@@ -421,15 +417,13 @@ soundweave/
 │
 ├── logging/
 │   ├── logger.py            # Dual logging setup
-│   └── manifest.py          # ManifestBuilder
+│   └── manifest.py          # ManifestBuilder (incl. SHA256/size tracking)
 │
 └── utils/
     ├── validators.py        # Pre-flight checks
-    ├── file_utils.py        # SHA256, file size
-    └── natural_sort.py      # Filename sorting
+    ├── natural_sort.py      # Filename sorting
+    └── youtube.py           # Track-name cleaning, chapter-timestamp formatting
 ```
-
-**Total lines of code**: ~1500 (excluding docs/tests)
 
 ## Comparison to Alternatives
 

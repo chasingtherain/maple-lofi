@@ -51,7 +51,11 @@ The `loop` subcommand is a parallel, separate entry point (`_run_loop_subcommand
 
 **No external Python packages in production code** — stdlib only (`argparse`, `subprocess`, `dataclasses`, `pathlib`, `logging`, `json`, `hashlib`). `pytest`/`ruff`/`black` are dev-only, under `[project.optional-dependencies].dev` in `pyproject.toml`. If the planned YouTube-download feature needs `yt-dlp`, the existing convention is to shell out to it as an external binary via a `commands.py`/`executor.py` pair mirroring `ffmpeg/`, not add it as a pip dependency — see `PRD.md` §5.
 
-## Known drift / gaps (don't be surprised by these)
+## Non-goals
 
-- `SPECIFICATION.md` and some ADR/architecture docs describe a "lofi" processing stage (texture/drums mixing, EQ, compression) that **does not exist in the code** — it was removed in an earlier refactor (`ca155e6`) that transformed this from a lofi-specific processor into a general random-track-selector/mashup tool, but the docs weren't fully updated. Don't assume `docs/` and `SPECIFICATION.md` are ground truth for current behavior; the stage modules in `soundweave/stages/` are.
+Lofi processing (texture/drums mixing, EQ, compression) is **not a goal of this project**, despite some historical ADRs using it as an example. It was fully removed from the code in an earlier refactor (`ca155e6`), and the docs describing it (`SPECIFICATION.md`, `TESTING_GUIDE.md`, `docs/PIPELINE_CONTRACT.md`) have since been deleted rather than updated. Scope going forward is strictly: stitch tracks together (crossfade/loudnorm/encode), optionally pair with video. Don't resurrect lofi-stage docs or code as "restoring" something — it's an intentionally dropped direction, not drift.
+
+## Known gaps
+
 - `tests/` has no actual test files yet, only `__init__.py`. `pyproject.toml` is already configured for pytest (`testpaths = ["tests"]`), so adding `tests/test_*.py` files just works.
+- `ruff check soundweave/` currently reports ~27 pre-existing lint findings, unaddressed.

@@ -93,7 +93,7 @@ class ManifestBuilder:
         """Add output file to manifest with metadata.
 
         Args:
-            name: Output name (merged_clean, merged_lofi_wav, etc.)
+            name: Output name (merged_clean, merged_mp3, etc.)
             path: Path to output file
         """
         if not path.exists():
@@ -132,7 +132,7 @@ class ManifestBuilder:
         """Add stage completion info.
 
         Args:
-            name: Stage name (ingest, merge, lofi, video)
+            name: Stage name (ingest, merge, encoding, video)
             status: Status (success, error)
             duration_s: How long the stage took
             **extras: Additional stage-specific info

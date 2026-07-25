@@ -27,6 +27,13 @@ class TestParseMashupArgs:
         assert args.image is None
         assert args.images_dir is None
         assert args.animated_background is None
+        assert args.dry_run is False
+
+    def test_dry_run_flag(self):
+        args = parse_mashup_args(
+            ["--urls", "urls.txt", "--output", "output", "--dry-run"]
+        )
+        assert args.dry_run is True
 
     def test_fade_ms_override(self):
         args = parse_mashup_args(

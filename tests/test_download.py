@@ -20,6 +20,7 @@ from soundweave.stages.download import (
     download_stage,
     fetch_metadata,
     parse_urls_file,
+    resolve_dry_run_tracklist,
     validate_mashup_input,
 )
 from soundweave.utils.validators import ValidationError
@@ -414,3 +415,140 @@ class TestDownloadStage:
             side_effect=ValidationError("yt-dlp not found"),
         ), pytest.raises(ValidationError):
             download_stage(config, logger)
+
+
+# ---------------------------------------------------------------------------
+# resolve_dry_run_tracklist — metadata-only resolution, no download_audio()
+# or probe_audio_file() calls (dry-run for the --dry-run mashup flag)
+# ---------------------------------------------------------------------------
+
+class TestResolveDryRunTracklist:
+    def _base_config(self, tmp_path, urls, **kwargs):
+        urls_file = tmp_path / "urls.txt"
+        urls_file.write_text("\n".join(urls) + "\n")
+        return MashupConfig(urls_file=urls_file, output_dir=tmp_path / "out", **kwargs)
+
+    def test_normal_resolution_returns_title_duration_pairs_in_order(self, tmp_path, logger):
+        urls = [
+            "https://youtube.com/watch?v=aaa",
+            "https://youtube.com/watch?v=bbb",
+        ]
+        config = self._base_config(tmp_path, urls)
+
+        def fake_fetch_metadata(url, logger, timeout=30):
+            vid = url.rsplit("=", 1)[-1]
+            return {"id": vid, "title": f"Title {vid}", "uploader": "Channel", "duration": 100.0}
+
+        with (
+            patch("soundweave.stages.download.validate_ytdlp", return_value="2024.01.01"),
+            patch("soundweave.stages.download.fetch_metadata", side_effect=fake_fetch_metadata),
+            patch("soundweave.stages.download.download_audio") as mock_download_audio,
+            patch("soundweave.stages.download.probe_audio_file") as mock_probe,
+        ):
+            resolved = resolve_dry_run_tracklist(config, logger)
+
+        assert resolved == [("Title aaa", 100.0), ("Title bbb", 100.0)]
+        # Dry run must never touch actual audio download/probe.
+        mock_download_audio.assert_not_called()
+        mock_probe.assert_not_called()
+
+    def test_no_files_or_directories_created_under_cache_dir(self, tmp_path, logger):
+        urls = ["https://youtube.com/watch?v=aaa"]
+        cache_dir = tmp_path / "cache"
+        config = self._base_config(tmp_path, urls, cache_dir=cache_dir)
+
+        def fake_fetch_metadata(url, logger, timeout=30):
+            return {"id": "aaa", "title": "Song", "uploader": "Channel", "duration": 42.0}
+
+        with (
+            patch("soundweave.stages.download.validate_ytdlp", return_value="2024.01.01"),
+            patch("soundweave.stages.download.fetch_metadata", side_effect=fake_fetch_metadata),
+        ):
+            resolve_dry_run_tracklist(config, logger)
+
+        assert not cache_dir.exists()
+
+    def test_failed_url_skipped_with_warning_when_not_strict(self, tmp_path, logger):
+        urls = [
+            "https://youtube.com/watch?v=good",
+            "https://youtube.com/watch?v=bad",
+        ]
+        config = self._base_config(tmp_path, urls)
+
+        def fake_fetch_metadata(url, logger, timeout=30):
+            if "bad" in url:
+                raise YtDlpError("video unavailable")
+            return {"id": "good", "title": "Good Song", "uploader": "Channel", "duration": 200.0}
+
+        with (
+            patch("soundweave.stages.download.validate_ytdlp", return_value="2024.01.01"),
+            patch("soundweave.stages.download.fetch_metadata", side_effect=fake_fetch_metadata),
+        ):
+            resolved = resolve_dry_run_tracklist(config, logger)
+
+        assert resolved == [("Good Song", 200.0)]
+
+    def test_failed_url_aborts_when_strict(self, tmp_path, logger):
+        urls = [
+            "https://youtube.com/watch?v=good",
+            "https://youtube.com/watch?v=bad",
+        ]
+        config = self._base_config(tmp_path, urls, strict=True)
+
+        def fake_fetch_metadata(url, logger, timeout=30):
+            if "bad" in url:
+                raise YtDlpError("video unavailable")
+            return {"id": "good", "title": "Good Song", "uploader": "Channel", "duration": 200.0}
+
+        with (
+            patch("soundweave.stages.download.validate_ytdlp", return_value="2024.01.01"),
+            patch("soundweave.stages.download.fetch_metadata", side_effect=fake_fetch_metadata),
+            pytest.raises(ValidationError),
+        ):
+            resolve_dry_run_tracklist(config, logger)
+
+    def test_all_urls_failing_raises(self, tmp_path, logger):
+        urls = ["https://youtube.com/watch?v=bad1", "https://youtube.com/watch?v=bad2"]
+        config = self._base_config(tmp_path, urls)
+
+        with (
+            patch("soundweave.stages.download.validate_ytdlp", return_value="2024.01.01"),
+            patch(
+                "soundweave.stages.download.fetch_metadata",
+                side_effect=YtDlpError("unavailable"),
+            ),
+            pytest.raises(ValidationError),
+        ):
+            resolve_dry_run_tracklist(config, logger)
+
+    def test_shuffle_still_returns_all_resolved_tracks(self, tmp_path, logger):
+        urls = [f"https://youtube.com/watch?v={i}" for i in range(5)]
+        config = self._base_config(tmp_path, urls, shuffle=True)
+
+        def fake_fetch_metadata(url, logger, timeout=30):
+            vid = url.rsplit("=", 1)[-1]
+            return {"id": vid, "title": f"Title {vid}", "uploader": "Channel", "duration": 60.0}
+
+        with (
+            patch("soundweave.stages.download.validate_ytdlp", return_value="2024.01.01"),
+            patch("soundweave.stages.download.fetch_metadata", side_effect=fake_fetch_metadata),
+        ):
+            resolved = resolve_dry_run_tracklist(config, logger)
+
+        assert len(resolved) == 5
+        assert {title for title, _ in resolved} == {f"Title {i}" for i in range(5)}
+
+    def test_missing_duration_defaults_to_zero(self, tmp_path, logger):
+        urls = ["https://youtube.com/watch?v=aaa"]
+        config = self._base_config(tmp_path, urls)
+
+        def fake_fetch_metadata(url, logger, timeout=30):
+            return {"id": "aaa", "title": "No Duration Song", "uploader": "Channel"}
+
+        with (
+            patch("soundweave.stages.download.validate_ytdlp", return_value="2024.01.01"),
+            patch("soundweave.stages.download.fetch_metadata", side_effect=fake_fetch_metadata),
+        ):
+            resolved = resolve_dry_run_tracklist(config, logger)
+
+        assert resolved == [("No Duration Song", 0.0)]

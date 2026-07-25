@@ -316,6 +316,10 @@ Examples:
   # from tools/ambient_bg/composite.sh)
   soundweave mashup --urls urls.txt --output output --animated-background loop.mp4
 
+  # Preview the resolved tracklist (titles, durations, order) without
+  # downloading any audio or running the rest of the pipeline
+  soundweave mashup --urls urls.txt --output output --dry-run
+
 urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
 (same convention as order.txt).
         """
@@ -360,6 +364,16 @@ urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
         dest="cache_dir",
         help="Directory for cached yt-dlp downloads, keyed by video ID (default: .cache/youtube)"
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help=(
+            "Resolve and print the tracklist (order, titles, durations, "
+            "estimated total runtime) without downloading audio or running "
+            "the rest of the pipeline. No files are written under --output."
+        )
+    )
 
     image_group = parser.add_mutually_exclusive_group()
     image_group.add_argument(
@@ -403,12 +417,14 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     Returns:
         Exit code.
     """
+    import logging
+
     from soundweave.ffmpeg.commands import build_mp3_command
     from soundweave.ffmpeg.executor import ProcessingError, run_ffmpeg
     from soundweave.ffmpeg.probe import probe_loudnorm_duration
     from soundweave.logging.logger import setup_logger
     from soundweave.mashup_config import MashupConfig
-    from soundweave.stages.download import download_stage
+    from soundweave.stages.download import download_stage, resolve_dry_run_tracklist
     from soundweave.stages.merge import merge_stage
     from soundweave.stages.video import (
         animated_background_video_stage,
@@ -418,7 +434,7 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     )
     from soundweave.utils.natural_sort import natural_sort
     from soundweave.utils.validators import validate_asset_path
-    from soundweave.utils.youtube import write_youtube_description
+    from soundweave.utils.youtube import format_timestamp, write_youtube_description
     from soundweave.ytdlp.executor import YtDlpError
 
     _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -441,6 +457,45 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         if config.images_dir is not None and not config.images_dir.is_dir():
             raise ValidationError(f"--images directory not found: {config.images_dir}")
         validate_asset_path(config.animated_background, "Animated background video")
+
+        if args.dry_run:
+            # Console-only logger — deliberately does NOT use setup_logger(),
+            # which would create mashup_log.txt under --output. A dry run
+            # must not write any file under --output.
+            dry_run_logger = logging.getLogger("soundweave.dry_run")
+            dry_run_logger.setLevel(logging.INFO)
+            dry_run_logger.handlers.clear()
+            dry_run_logger.propagate = False
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(logging.INFO)
+            console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+            dry_run_logger.addHandler(console_handler)
+
+            resolved = resolve_dry_run_tracklist(config, dry_run_logger)
+
+            crossfade_s = config.fade_ms / 1000.0
+            print()
+            print("Dry run: resolved tracklist (no audio downloaded)")
+            print("=" * 60)
+            current_time = 0.0
+            for idx, (title, duration_s) in enumerate(resolved):
+                start_ts = format_timestamp(current_time)
+                dur_ts = format_timestamp(duration_s)
+                print(f"{idx + 1:>3}. [{start_ts}] {title}  ({dur_ts})")
+                if idx < len(resolved) - 1:
+                    current_time += duration_s - crossfade_s
+
+            total_estimate = max(
+                sum(d for _, d in resolved) - crossfade_s * max(len(resolved) - 1, 0),
+                0.0,
+            )
+            print("=" * 60)
+            print(f"Tracks: {len(resolved)}")
+            print(f"Estimated total runtime: {format_timestamp(total_estimate)}")
+            print()
+            print("Dry run complete — no audio downloaded, no files written under --output.")
+
+            return 0
 
         logger = setup_logger(config.output_dir / "mashup_log.txt")
 

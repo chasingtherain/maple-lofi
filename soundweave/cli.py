@@ -421,7 +421,7 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
 
     from soundweave.ffmpeg.commands import build_mp3_command
     from soundweave.ffmpeg.executor import ProcessingError, run_ffmpeg
-    from soundweave.ffmpeg.probe import probe_loudnorm_duration
+    from soundweave.ffmpeg.probe import probe_audio_file, probe_loudnorm_duration
     from soundweave.logging.logger import setup_logger
     from soundweave.mashup_config import MashupConfig
     from soundweave.stages.download import download_stage, resolve_dry_run_tracklist
@@ -522,8 +522,18 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         merged_mp3 = config.output_dir / "merged.mp3"
         mp3_cmd = build_mp3_command(merged_clean, merged_mp3)
 
+        # Cheap up-front probe (ffprobe, not a decode) to drive
+        # progress/ETA logging on long mashup encodes.
+        merged_duration_s = probe_audio_file(merged_clean).duration_s
+
         logger.info("Encoding to MP3 (320kbps)...")
-        run_ffmpeg(mp3_cmd, logger, description="MP3 encoding (320kbps CBR)", timeout=None)
+        run_ffmpeg(
+            mp3_cmd,
+            logger,
+            description="MP3 encoding (320kbps CBR)",
+            timeout=None,
+            total_duration_s=merged_duration_s,
+        )
 
         mp3_size_mb = merged_mp3.stat().st_size / (1024 ** 2)
         logger.info(f"  {merged_mp3.name} ({mp3_size_mb:.1f}MB)")

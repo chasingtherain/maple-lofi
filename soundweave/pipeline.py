@@ -6,7 +6,7 @@ from pathlib import Path
 from soundweave.config import PipelineConfig
 from soundweave.ffmpeg.commands import build_mp3_command
 from soundweave.ffmpeg.executor import ProcessingError, run_ffmpeg
-from soundweave.ffmpeg.probe import probe_loudnorm_duration
+from soundweave.ffmpeg.probe import probe_audio_file, probe_loudnorm_duration
 from soundweave.logging.logger import setup_logger
 from soundweave.logging.manifest import ManifestBuilder
 from soundweave.stages.ingest import ingest_stage
@@ -90,12 +90,17 @@ class Pipeline:
             merged_mp3 = self.config.output_dir / "merged.mp3"
             mp3_cmd = build_mp3_command(merged_clean, merged_mp3)
 
+            # Cheap up-front probe (ffprobe, not a decode) to drive
+            # progress/ETA logging on long encodes.
+            merged_duration_s = probe_audio_file(merged_clean).duration_s
+
             self.logger.info("Encoding to MP3 (320kbps)...")
             run_ffmpeg(
                 mp3_cmd,
                 self.logger,
                 description="MP3 encoding (320kbps CBR)",
-                timeout=None
+                timeout=None,
+                total_duration_s=merged_duration_s,
             )
 
             mp3_size_mb = merged_mp3.stat().st_size / (1024 ** 2)

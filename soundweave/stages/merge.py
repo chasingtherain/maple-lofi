@@ -102,12 +102,19 @@ def merge_stage(
     # Build FFmpeg command
     command = build_merge_command(tracks, output_path, crossfades)
 
+    # Cheap up-front estimate of the merged output's duration -- tracks
+    # overlap by their crossfade duration, so it's not a plain sum. Used
+    # only to drive progress-percentage/ETA logging on long merges; a
+    # rough estimate is fine for that purpose.
+    estimated_duration_s = sum(t.duration_s for t in tracks) - sum(crossfades)
+
     # Execute
     run_ffmpeg(
         command,
         logger,
         description=f"Merging {len(tracks)} tracks with crossfades",
-        timeout=None  # No timeout for long merges
+        timeout=None,  # No timeout for long merges
+        total_duration_s=estimated_duration_s,
     )
 
     # Verify output

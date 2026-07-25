@@ -89,7 +89,8 @@ def video_stage(
         command,
         logger,
         description="Video rendering with static image",
-        timeout=None
+        timeout=None,
+        total_duration_s=duration_s,
     )
 
     _log_output_size(output_path, logger)
@@ -228,7 +229,8 @@ def video_sequence_stage(
         command,
         logger,
         description="Video rendering with per-track image sequence",
-        timeout=None
+        timeout=None,
+        total_duration_s=total_duration_s,
     )
 
     _log_output_size(output_path, logger)

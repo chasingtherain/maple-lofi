@@ -153,7 +153,7 @@ def parse_loop_args(argv: list[str] | None = None) -> argparse.Namespace:
         argv: Argument list (defaults to sys.argv[2:] — after the 'loop' token).
 
     Returns:
-        Parsed namespace with: input_file, count, gap_ms, output.
+        Parsed namespace with: input_file, url, count, gap_ms, output, cache_dir.
     """
     parser = argparse.ArgumentParser(
         prog="soundweave loop",
@@ -170,6 +170,9 @@ Examples:
   # Write output to a specific directory
   soundweave loop mysong.mp3 --count 10 --output /tmp/looped
 
+  # Loop a YouTube video's audio instead of a local file (--output required)
+  soundweave loop --url https://youtube.com/watch?v=XXXXXXXXXXX --count 5 --output output
+
 Output filename: <stem>_x<N>.mp3  (e.g. mysong_x5.mp3)
         """
     )
@@ -177,7 +180,29 @@ Output filename: <stem>_x<N>.mp3  (e.g. mysong_x5.mp3)
     parser.add_argument(
         "input_file",
         type=Path,
-        help="Audio file to loop (.mp3, .wav, .m4a, .flac)"
+        nargs="?",
+        default=None,
+        help="Audio file to loop (.mp3, .wav, .m4a, .flac). Omit if using --url."
+    )
+    parser.add_argument(
+        "--url",
+        type=str,
+        default=None,
+        help=(
+            "YouTube (or any yt-dlp-supported) URL to download and loop "
+            "instead of a local file. Mutually exclusive with input_file; "
+            "requires --output."
+        )
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        dest="cache_dir",
+        help=(
+            "Directory for cached yt-dlp downloads when using --url, keyed "
+            "by video ID (default: .cache/youtube, shared with 'mashup')"
+        )
     )
     parser.add_argument(
         "--count",
@@ -214,6 +239,22 @@ Output filename: <stem>_x<N>.mp3  (e.g. mysong_x5.mp3)
     return parser.parse_args(argv)
 
 
+def _safe_output_stem(title: str) -> str:
+    """Sanitize a YouTube video title into a filesystem-safe output stem.
+
+    Unlike utils/youtube.py's clean_track_name() (which cleans up local
+    filenames for display in youtube_description.txt), this is the reverse
+    direction: an arbitrary video title -> something safe to put on disk.
+    Strips path separators and other filesystem-hostile characters, collapses
+    whitespace, and truncates to a sane length.
+    """
+    import re
+
+    stem = re.sub(r'[\\/:*?"<>|]+', " ", title)
+    stem = re.sub(r"\s+", " ", stem).strip()
+    return stem[:80] or "loop"
+
+
 def _run_loop_subcommand(argv: list[str]) -> int:
     """Handle the 'loop' subcommand.
 
@@ -226,23 +267,70 @@ def _run_loop_subcommand(argv: list[str]) -> int:
     from soundweave.ffmpeg.executor import ProcessingError
     from soundweave.logging.logger import setup_logger
     from soundweave.loop_config import LoopConfig
+    from soundweave.mashup_config import DEFAULT_CACHE_DIR
+    from soundweave.stages.download import (
+        download_audio,
+        fetch_metadata,
+        resolve_safe_video_id,
+    )
     from soundweave.stages.loop import loop_stage
+    from soundweave.ytdlp.executor import YtDlpError, validate_ytdlp
 
     try:
         args = parse_loop_args(argv)
-        config = LoopConfig(
-            input_file=args.input_file,
-            count=args.count,
-            gap_ms=args.gap_ms,
-            output_dir=args.output,
-            trim_db=args.trim_db,
-        )
 
-        logger = setup_logger(config.output_dir / "loop_log.txt")
+        if bool(args.input_file) == bool(args.url):
+            raise ValidationError(
+                "Provide exactly one of a local audio file or --url, not both/neither"
+            )
 
-        logger.info("=" * 60)
-        logger.info("Soundweave - Loop Subcommand")
-        logger.info("=" * 60)
+        if args.url:
+            if args.output is None:
+                raise ValidationError("--output is required when using --url")
+
+            output_dir = args.output
+            output_dir.mkdir(parents=True, exist_ok=True)
+            logger = setup_logger(output_dir / "loop_log.txt")
+
+            logger.info("=" * 60)
+            logger.info("Soundweave - Loop Subcommand")
+            logger.info("=" * 60)
+            logger.info(f"Source:    {args.url}")
+            logger.info("")
+
+            validate_ytdlp()
+            cache_dir = args.cache_dir or DEFAULT_CACHE_DIR
+
+            logger.info(f"Fetching metadata for {args.url}...")
+            metadata = fetch_metadata(args.url, logger)
+            video_id = resolve_safe_video_id(metadata, args.url)
+            title = metadata.get("title") or video_id
+            logger.info(f"  Title: {title}")
+
+            audio_path = download_audio(args.url, video_id, cache_dir, logger)
+
+            config = LoopConfig(
+                input_file=audio_path,
+                count=args.count,
+                gap_ms=args.gap_ms,
+                output_dir=output_dir,
+                trim_db=args.trim_db,
+                output_stem=_safe_output_stem(title),
+            )
+        else:
+            config = LoopConfig(
+                input_file=args.input_file,
+                count=args.count,
+                gap_ms=args.gap_ms,
+                output_dir=args.output,
+                trim_db=args.trim_db,
+            )
+            logger = setup_logger(config.output_dir / "loop_log.txt")
+
+            logger.info("=" * 60)
+            logger.info("Soundweave - Loop Subcommand")
+            logger.info("=" * 60)
+
         logger.info(f"Run ID:    {config.run_id}")
         logger.info(f"Timestamp: {config.timestamp}")
         logger.info("")
@@ -260,7 +348,7 @@ def _run_loop_subcommand(argv: list[str]) -> int:
     except ValidationError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
-    except ProcessingError as e:
+    except (ProcessingError, YtDlpError) as e:
         print(f"PROCESSING ERROR: {e}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
@@ -281,8 +369,10 @@ def parse_mashup_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     Returns:
         Parsed namespace with: urls, output, fade_ms, shuffle, strict,
-        cache_dir, image, images_dir, animated_background.
+        cache_dir, image, images_dir, animated_background, loop_count,
+        loop_gap_ms, loop_trim_db.
     """
+    from soundweave.loop_config import DEFAULT_GAP_MS, DEFAULT_TRIM_DB
     from soundweave.mashup_config import DEFAULT_FADE_MS
 
     parser = argparse.ArgumentParser(
@@ -326,6 +416,11 @@ Examples:
 
   # Same, with an explicit font instead of the auto-detected system default
   soundweave mashup --urls urls.txt --output output --image cover.png --track-cards --font /path/to/font.ttf
+
+  # Combine 5 songs into one crossfaded track, then loop that whole set 20
+  # times with a gap between reps (e.g. a long-running background video) --
+  # chapters/track-cards repeat once per rep. Not yet supported with --images.
+  soundweave mashup --urls urls.txt --output output --loop-count 20
 
 urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
 (same convention as order.txt).
@@ -435,6 +530,40 @@ urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
         )
     )
 
+    parser.add_argument(
+        "--loop-count",
+        type=int,
+        default=None,
+        dest="loop_count",
+        help=(
+            "Repeat the whole crossfaded mashup this many times end-to-end "
+            "(same trim/fade/gap treatment as the 'loop' subcommand), "
+            "producing one long looped file. YouTube chapters and "
+            "--track-cards repeat once per rep. Not yet supported together "
+            "with --images. Omit to skip looping (default)."
+        )
+    )
+    parser.add_argument(
+        "--loop-gap-ms",
+        type=int,
+        default=DEFAULT_GAP_MS,
+        dest="loop_gap_ms",
+        help=(
+            f"Silence between loop repetitions in milliseconds (default: "
+            f"{DEFAULT_GAP_MS}). Only used with --loop-count."
+        )
+    )
+    parser.add_argument(
+        "--loop-trim-db",
+        type=float,
+        default=DEFAULT_TRIM_DB,
+        dest="loop_trim_db",
+        help=(
+            f"dB threshold for trimming the quiet tail before each loop gap "
+            f"(default: {DEFAULT_TRIM_DB}). Only used with --loop-count."
+        )
+    )
+
     return parser.parse_args(argv)
 
 
@@ -453,8 +582,10 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     from soundweave.ffmpeg.executor import ProcessingError, run_ffmpeg
     from soundweave.ffmpeg.probe import probe_audio_file, probe_loudnorm_duration
     from soundweave.logging.logger import setup_logger
+    from soundweave.loop_config import LoopConfig
     from soundweave.mashup_config import MashupConfig
     from soundweave.stages.download import download_stage, resolve_dry_run_tracklist
+    from soundweave.stages.loop import loop_stage
     from soundweave.stages.merge import merge_stage
     from soundweave.stages.video import (
         animated_background_video_stage,
@@ -467,6 +598,7 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     from soundweave.utils.youtube import (
         clean_track_name,
         format_timestamp,
+        format_youtube_description,
         write_youtube_description,
     )
     from soundweave.ytdlp.executor import YtDlpError
@@ -485,12 +617,25 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             static_image=args.image,
             images_dir=args.images_dir,
             animated_background=args.animated_background,
+            loop_count=args.loop_count,
+            loop_gap_ms=args.loop_gap_ms,
+            loop_trim_db=args.loop_trim_db,
         )
 
         validate_asset_path(config.static_image, "Static image")
         if config.images_dir is not None and not config.images_dir.is_dir():
             raise ValidationError(f"--images directory not found: {config.images_dir}")
         validate_asset_path(config.animated_background, "Animated background video")
+        if config.loop_count is not None:
+            if config.loop_count < 1:
+                raise ValidationError(f"--loop-count must be >= 1, got {config.loop_count}")
+            if config.images_dir is not None:
+                raise ValidationError(
+                    "--loop-count is not yet supported together with --images "
+                    "(per-track image sequencing doesn't know how to repeat/gap "
+                    "itself to match a looped audio duration) -- use --image or "
+                    "--animated-background instead, or omit --loop-count."
+                )
 
         if args.dry_run:
             # Console-only logger — deliberately does NOT use setup_logger(),
@@ -526,6 +671,16 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             print("=" * 60)
             print(f"Tracks: {len(resolved)}")
             print(f"Estimated total runtime: {format_timestamp(total_estimate)}")
+            if config.loop_count:
+                loop_gap_s = config.loop_gap_ms / 1000.0
+                looped_estimate = (
+                    total_estimate * config.loop_count
+                    + loop_gap_s * max(config.loop_count - 1, 0)
+                )
+                print(
+                    f"Estimated total runtime (looped x{config.loop_count}, approx): "
+                    f"{format_timestamp(looped_estimate)}"
+                )
             print()
             print("Dry run complete — no audio downloaded, no files written under --output.")
 
@@ -600,16 +755,74 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
                     current_time += track.duration_s - crossfade_s
                     actual_timestamps.append(current_time)
 
+        # Stage 3b: Loop repeat (optional) — repeat the whole crossfaded
+        # mashup end-to-end via the same LoopConfig/loop_stage machinery the
+        # standalone `loop` subcommand uses on a single file (merged_clean.wav
+        # is itself just "a single audio file" as far as loop_stage cares).
+        # `output_stem="merged"` keeps the naming consistent with merged.mp3
+        # instead of inheriting merged_clean's own stem.
+        looped_mp3 = None
+        loop_rep_duration_s = None
+        if config.loop_count:
+            looped_mp3 = loop_stage(
+                LoopConfig(
+                    input_file=merged_clean,
+                    count=config.loop_count,
+                    gap_ms=config.loop_gap_ms,
+                    trim_db=config.loop_trim_db,
+                    output_dir=config.output_dir,
+                    output_stem="merged",
+                ),
+                logger,
+            )
+            logger.info("")
+
+            # build_loop_command's silenceremove+afade filter is deterministic
+            # per identical input, so every rep has the same effective
+            # duration -- recovered algebraically from the looped output's
+            # total probed duration rather than re-running ffmpeg per rep:
+            #   total = N*rep_duration + (N-1)*gap_s
+            looped_total_s = probe_audio_file(looped_mp3).duration_s
+            loop_gap_s = config.loop_gap_ms / 1000.0
+            loop_rep_duration_s = (
+                looped_total_s - loop_gap_s * (config.loop_count - 1)
+            ) / config.loop_count
+
+        # Repeated (name, start_s) events across all loop reps, used for both
+        # the YouTube description and --track-cards below. Per-track offsets
+        # within a rep stay valid as measured (loop's trim/fade only touches
+        # the very start/end of the file, never the middle where earlier
+        # tracks live), so each rep is just the original offsets shifted by
+        # rep_idx * (rep_duration + gap_s).
+        looped_events = None
+        if config.loop_count and loop_rep_duration_s is not None:
+            stride_s = loop_rep_duration_s + loop_gap_s
+            looped_events = [
+                (
+                    clean_track_name(track.filename)
+                    + (f" (loop {rep + 1}/{config.loop_count})" if config.loop_count > 1 else ""),
+                    rep * stride_s + start_s,
+                )
+                for rep in range(config.loop_count)
+                for track, start_s in zip(tracks, actual_timestamps)
+            ]
+
         logger.info("Generating YouTube timestamps...")
-        write_youtube_description(
-            description_path,
-            tracks,
-            crossfade_s,
-            title="Tracklist",
-            actual_timestamps=(
-                actual_timestamps if len(actual_timestamps) == len(tracks) else None
-            ),
-        )
+        if looped_events is not None:
+            description = format_youtube_description(
+                [(start_s, name) for name, start_s in looped_events], title="Tracklist"
+            )
+            description_path.write_text(description + "\n", encoding="utf-8")
+        else:
+            write_youtube_description(
+                description_path,
+                tracks,
+                crossfade_s,
+                title="Tracklist",
+                actual_timestamps=(
+                    actual_timestamps if len(actual_timestamps) == len(tracks) else None
+                ),
+            )
         logger.info(f"  {description_path.name}")
         logger.info("")
 
@@ -620,7 +833,9 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         # overlay with a warning instead of pairing mismatched data).
         track_cards = None
         if args.track_cards:
-            if len(actual_timestamps) == len(tracks):
+            if looped_events is not None:
+                track_cards = looped_events
+            elif len(actual_timestamps) == len(tracks):
                 track_cards = [
                     (clean_track_name(track.filename), start_s)
                     for track, start_s in zip(tracks, actual_timestamps)
@@ -637,6 +852,12 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         # overlay on the first two modes only -- animated_background_video_stage()
         # doesn't take track_cards/font_path (T1 was scoped before
         # --animated-background existed; not extended to it here either).
+        # `video_audio` is the looped file when --loop-count is set (both
+        # video_stage and animated_background_video_stage self-probe
+        # whatever audio_path they're given, so pointing them at the longer
+        # looped file "just works"); the --images branch is unreachable here
+        # since --loop-count + --images was rejected during validation above.
+        video_audio = looped_mp3 if looped_mp3 is not None else merged_clean
         final_video = None
         if config.images_dir is not None:
             images = natural_sort([
@@ -646,7 +867,7 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             image_paths = [config.images_dir / name for name in images]
             image_sequence = match_images_to_tracks(image_paths, actual_durations)
             final_video = video_sequence_stage(
-                merged_clean,
+                video_audio,
                 image_sequence,
                 config.output_dir,
                 logger,
@@ -655,11 +876,11 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             )
         elif config.static_image is not None:
             final_video = video_stage(
-                merged_clean, config, logger, track_cards=track_cards, font_path=args.font
+                video_audio, config, logger, track_cards=track_cards, font_path=args.font
             )
         elif config.animated_background is not None:
             final_video = animated_background_video_stage(
-                merged_clean, config.animated_background, config.output_dir, logger
+                video_audio, config.animated_background, config.output_dir, logger
             )
         else:
             logger.info("=== Stage 4: Video Rendering ===")
@@ -668,7 +889,11 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         logger.info("")
         logger.info("=" * 60)
         logger.info("Mashup completed successfully!")
-        logger.info(f"Output:      {merged_mp3}")
+        if looped_mp3 is not None:
+            logger.info(f"Output (single pass):    {merged_mp3}")
+            logger.info(f"Output (looped x{config.loop_count}): {looped_mp3}")
+        else:
+            logger.info(f"Output:      {merged_mp3}")
         logger.info(f"Description: {description_path}")
         if final_video:
             logger.info(f"Video:       {final_video}")

@@ -7,8 +7,9 @@ Stdlib-only HTTP server, bound to 127.0.0.1 only. Two forms:
   three mutually-exclusive modes as the CLI's
   `--image`/`--images`/`--animated-background`), then shells out to
   `python -m soundweave mashup`.
-- `/loop`: upload one audio file and a repeat count, then shells out to
-  `python -m soundweave loop`.
+- `/loop`: either upload one audio file, or paste a YouTube URL to download
+  and loop instead, plus a repeat count; shells out to `python -m soundweave
+  loop`.
 
 Either form runs the exact CLI subcommand you'd type by hand as a subprocess
 and streams its combined stdout/stderr back to the browser. The browser is a
@@ -146,6 +147,16 @@ class _MashupUIServer(ThreadingHTTPServer):
         if _field_text(fields, "strict") == "on":
             cmd.append("--strict")
 
+        loop_count_text = _field_text(fields, "loop_count").strip()
+        if loop_count_text:
+            try:
+                loop_count = int(loop_count_text)
+            except ValueError:
+                raise ValueError("Repeat count must be a whole number") from None
+            if loop_count < 1:
+                raise ValueError("Repeat count must be at least 1")
+            cmd += ["--loop-count", str(loop_count)]
+
         # Exactly one of --image/--images/--animated-background, matching
         # cli.py's mutually-exclusive argparse group. `video_mode` (a radio
         # button, not "any field with bytes in it") is the source of truth
@@ -209,14 +220,6 @@ class _MashupUIServer(ThreadingHTTPServer):
 
     def start_loop_job(self, content_type: str, body: bytes) -> str:
         fields = _parse_multipart(content_type, body)
-        audio_parts = fields.get("audio")
-        if not audio_parts:
-            raise ValueError("No audio file provided")
-        part = audio_parts[0]
-        filename = part.get_filename()
-        audio_bytes = part.get_payload(decode=True) or b""
-        if not filename or not audio_bytes:
-            raise ValueError("No audio file provided")
 
         count_text = _field_text(fields, "count").strip()
         try:
@@ -226,28 +229,63 @@ class _MashupUIServer(ThreadingHTTPServer):
         if count < 1:
             raise ValueError("Repeat count must be at least 1")
 
-        ext = Path(filename).suffix.lower()
-        if ext not in _AUDIO_EXTENSIONS:
-            raise ValueError(
-                f"Unsupported audio file type '{ext or filename}' "
-                f"(expected one of: {', '.join(sorted(_AUDIO_EXTENSIONS))})"
-            )
-
+        # source_mode (a radio button) is the source of truth for which
+        # source to use, matching start_job()'s video_mode pattern above --
+        # a browser could in principle submit both an "audio" file and a
+        # "url" field, and only the selected mode's field should be honored.
+        source_mode = _field_text(fields, "source_mode", "upload")
         job_dir = self._new_job_dir()
-        audio_path = job_dir / f"input{ext}"
-        audio_path.write_bytes(audio_bytes)
 
-        cmd = [
-            sys.executable,
-            "-m",
-            "soundweave",
-            "loop",
-            str(audio_path),
-            "--count",
-            str(count),
-            "--output",
-            str(job_dir),
-        ]
+        if source_mode == "url":
+            url = _field_text(fields, "url").strip()
+            if not url:
+                raise ValueError("No URL provided")
+            if not url.startswith(("http://", "https://")):
+                raise ValueError("URL must start with http:// or https://")
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "soundweave",
+                "loop",
+                "--url",
+                url,
+                "--count",
+                str(count),
+                "--output",
+                str(job_dir),
+            ]
+        else:
+            audio_parts = fields.get("audio")
+            if not audio_parts:
+                raise ValueError("No audio file provided")
+            part = audio_parts[0]
+            filename = part.get_filename()
+            audio_bytes = part.get_payload(decode=True) or b""
+            if not filename or not audio_bytes:
+                raise ValueError("No audio file provided")
+
+            ext = Path(filename).suffix.lower()
+            if ext not in _AUDIO_EXTENSIONS:
+                raise ValueError(
+                    f"Unsupported audio file type '{ext or filename}' "
+                    f"(expected one of: {', '.join(sorted(_AUDIO_EXTENSIONS))})"
+                )
+
+            audio_path = job_dir / f"input{ext}"
+            audio_path.write_bytes(audio_bytes)
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "soundweave",
+                "loop",
+                str(audio_path),
+                "--count",
+                str(count),
+                "--output",
+                str(job_dir),
+            ]
 
         gap_ms_text = _field_text(fields, "gap_ms", str(DEFAULT_GAP_MS)).strip()
         try:

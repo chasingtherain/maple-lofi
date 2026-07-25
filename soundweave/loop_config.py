@@ -27,6 +27,11 @@ class LoopConfig:
                      the gap is inserted, accounting for natural wind-down.
         run_id:      UUID for this run, auto-generated.
         timestamp:   ISO-8601 UTC timestamp, auto-generated.
+        output_stem: Override for output_filename's stem. Unset when looping
+                     a local file (the file's own stem is used, as before).
+                     Set by the --url path (cli.py) to a sanitized video
+                     title, since the downloaded file's stem is a cache-key
+                     video id, not something worth naming the output after.
     """
 
     input_file: Path
@@ -35,6 +40,7 @@ class LoopConfig:
     output_dir: Path | None = None
     fade_s: float = FADE_DURATION_S
     trim_db: float = DEFAULT_TRIM_DB
+    output_stem: str | None = None
     run_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -54,7 +60,8 @@ class LoopConfig:
 
     @property
     def output_filename(self) -> str:
-        return f"{self.input_file.stem}_x{self.count}.mp3"
+        stem = self.output_stem or self.input_file.stem
+        return f"{stem}_x{self.count}.mp3"
 
     @property
     def output_path(self) -> Path:

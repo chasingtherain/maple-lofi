@@ -134,6 +134,32 @@ def fetch_metadata(url: str, logger: logging.Logger, timeout: int = 30) -> dict:
         raise YtDlpError(f"Failed to parse yt-dlp metadata for {url}: {e}")
 
 
+def resolve_safe_video_id(metadata: dict, url: str) -> str:
+    """Extract and validate a yt-dlp video id from fetch_metadata()'s result.
+
+    Shared by the mashup download stage and the loop subcommand's --url path
+    so the cache-path-safety check (see _SAFE_VIDEO_ID above) has one
+    definition rather than two copies that could drift apart.
+
+    Args:
+        metadata: Parsed yt-dlp JSON metadata dict (from fetch_metadata()).
+        url: The source URL, used only for error messages.
+
+    Returns:
+        The video id string.
+
+    Raises:
+        YtDlpError: If metadata has no id, or the id isn't safe to use as a
+            cache filename component.
+    """
+    video_id = metadata.get("id")
+    if not video_id:
+        raise YtDlpError(f"yt-dlp metadata missing video id for {url}")
+    if not _SAFE_VIDEO_ID.match(video_id):
+        raise YtDlpError(f"yt-dlp returned an unsafe video id for {url}: {video_id!r}")
+    return video_id
+
+
 def download_audio(
     url: str,
     video_id: str,
@@ -300,13 +326,7 @@ def download_stage(config: MashupConfig, logger: logging.Logger) -> list[MashupT
         logger.info(f"[{i}/{len(ordered_urls)}] {url}")
         try:
             metadata = fetch_metadata(url, logger)
-            video_id = metadata.get("id")
-            if not video_id:
-                raise YtDlpError(f"yt-dlp metadata missing video id for {url}")
-            if not _SAFE_VIDEO_ID.match(video_id):
-                raise YtDlpError(
-                    f"yt-dlp returned an unsafe video id for {url}: {video_id!r}"
-                )
+            video_id = resolve_safe_video_id(metadata, url)
 
             title = metadata.get("title") or video_id
             uploader = metadata.get("uploader")

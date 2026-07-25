@@ -60,15 +60,25 @@ Runs locally via the existing <code>soundweave mashup</code> command - nothing l
     </div>
   </div>
 
+  <label for="loop_count">Repeat count (optional)</label>
+  <input type="number" id="loop_count" name="loop_count" min="1" step="1" placeholder="leave blank for no repeat">
+  <p class="hint" id="loop_count_hint">Repeat the whole crossfaded set this many times end-to-end, with a
+  silence gap between reps (e.g. for a long-running loop video from several songs). Chapters and
+  track-cards repeat once per rep. Not supported together with "Per-track images" below.</p>
+
   <button type="submit">Run mashup</button>
 </form>
 <script>
 const panels = { image: "panel-image", images: "panel-images", animated_background: "panel-animated_background" };
+const loopCountInput = document.getElementById("loop_count");
 for (const radio of document.querySelectorAll('input[name="video_mode"]')) {
   radio.addEventListener("change", () => {
     for (const [mode, panelId] of Object.entries(panels)) {
       document.getElementById(panelId).style.display = (mode === radio.value) ? "" : "none";
     }
+    const imagesMode = radio.value === "images";
+    loopCountInput.disabled = imagesMode;
+    if (imagesMode) loopCountInput.value = "";
   });
 }
 </script>
@@ -86,6 +96,10 @@ LOOP_HTML = """<!doctype html>
   label { display: block; margin-top: 16px; font-weight: 600; }
   input[type=file], input[type=number] { margin-top: 4px; }
   .row { display: flex; gap: 24px; align-items: center; margin-top: 12px; }
+  .mode-row { display: flex; gap: 20px; align-items: center; margin-top: 8px; font-weight: 400; }
+  .mode-row label { display: inline-flex; align-items: center; gap: 6px; margin-top: 0; font-weight: 400; }
+  .mode-panel { margin-top: 8px; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 6px; font-size: 14px; }
   button { margin-top: 24px; padding: 10px 20px; font-size: 15px; cursor: pointer; }
   .hint { color: #666; font-size: 13px; margin-top: 4px; }
   .nav { font-size: 14px; margin-bottom: 16px; }
@@ -95,12 +109,23 @@ LOOP_HTML = """<!doctype html>
 <body>
 <div class="nav"><a href="/">Mashup</a> <span>|</span> <a href="/loop">Loop</a></div>
 <h1>Soundweave - Loop</h1>
-<p class="hint">Upload one audio file and repeat it N times with a silence gap between reps
+<p class="hint">Repeat one track N times with a silence gap between reps
 (e.g. for a 1-hour loop video). Runs locally via the existing <code>soundweave loop</code>
 command - nothing leaves this machine.</p>
 <form method="post" action="/run-loop" enctype="multipart/form-data">
-  <label for="audio">Audio file</label>
-  <input type="file" id="audio" name="audio" accept=".mp3,.wav,.m4a,.flac" required>
+  <label>Source</label>
+  <div class="mode-row">
+    <label><input type="radio" name="source_mode" value="upload" checked> Upload file</label>
+    <label><input type="radio" name="source_mode" value="url"> YouTube URL</label>
+  </div>
+
+  <div class="mode-panel" id="panel-upload">
+    <input type="file" id="audio" name="audio" accept=".mp3,.wav,.m4a,.flac" required>
+  </div>
+  <div class="mode-panel" id="panel-url" style="display:none">
+    <input type="text" id="url" name="url" placeholder="https://youtube.com/watch?v=...">
+    <p class="hint">Downloads the video's audio via yt-dlp, then loops it.</p>
+  </div>
 
   <div class="row">
     <div>
@@ -119,6 +144,18 @@ command - nothing leaves this machine.</p>
 
   <button type="submit">Run loop</button>
 </form>
+<script>
+const audioInput = document.getElementById("audio");
+const panels = { upload: "panel-upload", url: "panel-url" };
+for (const radio of document.querySelectorAll('input[name="source_mode"]')) {
+  radio.addEventListener("change", () => {
+    for (const [mode, panelId] of Object.entries(panels)) {
+      document.getElementById(panelId).style.display = (mode === radio.value) ? "" : "none";
+    }
+    audioInput.required = (radio.value === "upload");
+  });
+}
+</script>
 </body>
 </html>
 """

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from soundweave.loop_config import DEFAULT_GAP_MS, DEFAULT_TRIM_DB
+
 # PRD.md §11: crossfade default for mashup mode, verified by ear against a
 # 4-track local sample — reads as a clean song-to-song transition rather than
 # a DJ-style overlap. Overridable via --fade-ms.
@@ -53,6 +55,18 @@ class MashupConfig:
                      ffmpeg to cover the full audio duration. See
                      animated_background_video_stage() in
                      soundweave/stages/video.py.
+        loop_count:  If set, repeat the whole crossfaded mashup this many
+                     times end-to-end (via the same LoopConfig/loop_stage
+                     machinery the standalone `loop` subcommand uses) before
+                     final video rendering. None (default) skips looping —
+                     unchanged behavior. Mutually exclusive with images_dir
+                     (see cli.py's mashup subcommand for why).
+        loop_gap_ms: Silence between loop repetitions in milliseconds, only
+                     used when loop_count is set. Same default as the `loop`
+                     subcommand.
+        loop_trim_db: dB threshold for trimming the quiet tail before each
+                     loop gap, only used when loop_count is set. Same
+                     default as the `loop` subcommand.
         run_id:      UUID for this run, auto-generated.
         timestamp:   ISO-8601 UTC timestamp, auto-generated.
     """
@@ -66,6 +80,9 @@ class MashupConfig:
     static_image: Path | None = None
     images_dir: Path | None = None
     animated_background: Path | None = None
+    loop_count: int | None = None
+    loop_gap_ms: int = DEFAULT_GAP_MS
+    loop_trim_db: float = DEFAULT_TRIM_DB
     run_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

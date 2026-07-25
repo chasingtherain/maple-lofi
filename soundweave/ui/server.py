@@ -1,10 +1,12 @@
 """Local web UI for the mashup subcommand.
 
 Stdlib-only HTTP server, bound to 127.0.0.1 only: serves a form to paste
-YouTube URLs and upload a cover image, then shells out to
-`python -m soundweave mashup` (the exact CLI subcommand you'd run by hand)
-and streams its combined stdout/stderr back to the browser. The browser is
-a thin front-end over the CLI, not a second pipeline implementation.
+YouTube URLs and choose a video source (a single cover image, one image per
+track, or a looping animated background -- the same three mutually-exclusive
+modes as the CLI's `--image`/`--images`/`--animated-background`), then shells
+out to `python -m soundweave mashup` (the exact CLI subcommand you'd run by
+hand) and streams its combined stdout/stderr back to the browser. The browser
+is a thin front-end over the CLI, not a second pipeline implementation.
 """
 
 import json
@@ -123,18 +125,64 @@ class _MashupUIServer(ThreadingHTTPServer):
         if _field_text(fields, "strict") == "on":
             cmd.append("--strict")
 
-        image_parts = fields.get("image")
-        if image_parts:
-            part = image_parts[0]
-            filename = part.get_filename()
-            image_bytes = part.get_payload(decode=True) or b""
-            if filename and image_bytes:
-                ext = Path(filename).suffix.lower()
-                if ext not in _IMAGE_EXTENSIONS:
-                    ext = ".png"
-                cover_path = job_dir / f"cover{ext}"
-                cover_path.write_bytes(image_bytes)
-                cmd += ["--image", str(cover_path)]
+        # Exactly one of --image/--images/--animated-background, matching
+        # cli.py's mutually-exclusive argparse group. `video_mode` (a radio
+        # button, not "any field with bytes in it") is the source of truth
+        # for which one -- a browser could in principle submit more than one
+        # file field, and only the selected mode's field should be honored.
+        video_mode = _field_text(fields, "video_mode", "image")
+
+        if video_mode == "image":
+            image_parts = fields.get("image")
+            if image_parts:
+                part = image_parts[0]
+                filename = part.get_filename()
+                image_bytes = part.get_payload(decode=True) or b""
+                if filename and image_bytes:
+                    ext = Path(filename).suffix.lower()
+                    if ext not in _IMAGE_EXTENSIONS:
+                        ext = ".png"
+                    cover_path = job_dir / f"cover{ext}"
+                    cover_path.write_bytes(image_bytes)
+                    cmd += ["--image", str(cover_path)]
+
+        elif video_mode == "images":
+            image_parts = fields.get("images") or []
+            written_any = False
+            images_dir = job_dir / "images"
+            for part in image_parts:
+                filename = part.get_filename()
+                image_bytes = part.get_payload(decode=True) or b""
+                if not filename or not image_bytes:
+                    continue
+                # Path(...).name strips any directory components a
+                # maliciously-crafted filename might carry -- this server is
+                # 127.0.0.1-only, but writing under job_dir with an
+                # untrusted filename is cheap to get right regardless.
+                safe_name = Path(filename).name
+                if not safe_name:
+                    continue
+                images_dir.mkdir(parents=True, exist_ok=True)
+                (images_dir / safe_name).write_bytes(image_bytes)
+                written_any = True
+            if written_any:
+                # cli.py's _run_mashup_subcommand natural-sorts the
+                # directory listing itself when it processes --images, so
+                # order here doesn't need to be re-derived -- just get each
+                # file onto disk with its original name.
+                cmd += ["--images", str(images_dir)]
+
+        elif video_mode == "animated_background":
+            bg_parts = fields.get("animated_background")
+            if bg_parts:
+                part = bg_parts[0]
+                filename = part.get_filename()
+                video_bytes = part.get_payload(decode=True) or b""
+                if filename and video_bytes:
+                    ext = Path(filename).suffix.lower() or ".mp4"
+                    bg_path = job_dir / f"animated_background{ext}"
+                    bg_path.write_bytes(video_bytes)
+                    cmd += ["--animated-background", str(bg_path)]
 
         log_path = job_dir / "process.log"
         # Must stay open past this function's return — the child process

@@ -6,6 +6,8 @@ since parse_mashup_args() doesn't touch yt-dlp or FFmpeg.
 
 from pathlib import Path
 
+import pytest
+
 from soundweave.cli import parse_mashup_args
 from soundweave.mashup_config import DEFAULT_FADE_MS
 
@@ -22,6 +24,8 @@ class TestParseMashupArgs:
         assert args.shuffle is False
         assert args.strict is False
         assert args.cache_dir is None
+        assert args.image is None
+        assert args.images_dir is None
 
     def test_fade_ms_override(self):
         args = parse_mashup_args(
@@ -46,3 +50,26 @@ class TestParseMashupArgs:
             ["--urls", "urls.txt", "--output", "output", "--cache-dir", "/tmp/mycache"]
         )
         assert args.cache_dir == Path("/tmp/mycache")
+
+    def test_image_flag(self):
+        args = parse_mashup_args(
+            ["--urls", "urls.txt", "--output", "output", "--image", "cover.png"]
+        )
+        assert args.image == Path("cover.png")
+        assert args.images_dir is None
+
+    def test_images_flag(self):
+        args = parse_mashup_args(
+            ["--urls", "urls.txt", "--output", "output", "--images", "covers/"]
+        )
+        assert args.images_dir == Path("covers/")
+        assert args.image is None
+
+    def test_image_and_images_are_mutually_exclusive(self):
+        with pytest.raises(SystemExit):
+            parse_mashup_args(
+                [
+                    "--urls", "urls.txt", "--output", "output",
+                    "--image", "cover.png", "--images", "covers/",
+                ]
+            )

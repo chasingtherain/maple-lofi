@@ -36,6 +36,14 @@ class MashupConfig:
                      (<id>.m4a) so re-running a mashup (tweaking crossfade,
                      images, etc.) doesn't re-download. Defaults to
                      ./.cache/youtube.
+        static_image: Single cover image for the whole video's duration
+                     (mutually exclusive with images_dir). Same attribute
+                     name as PipelineConfig.static_image so video_stage()
+                     can be called with a MashupConfig unmodified.
+        images_dir:  Directory of per-track images for the video's
+                     per-track image-swap mode (mutually exclusive with
+                     static_image). See match_images_to_tracks() /
+                     video_sequence_stage() in soundweave/stages/video.py.
         run_id:      UUID for this run, auto-generated.
         timestamp:   ISO-8601 UTC timestamp, auto-generated.
     """
@@ -46,6 +54,8 @@ class MashupConfig:
     shuffle: bool = False
     strict: bool = False
     cache_dir: Path | None = None
+    static_image: Path | None = None
+    images_dir: Path | None = None
     run_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -58,5 +68,9 @@ class MashupConfig:
             self.output_dir = Path(self.output_dir)
         if isinstance(self.cache_dir, str):
             self.cache_dir = Path(self.cache_dir)
+        if isinstance(self.static_image, str):
+            self.static_image = Path(self.static_image)
+        if isinstance(self.images_dir, str):
+            self.images_dir = Path(self.images_dir)
         if self.cache_dir is None:
             self.cache_dir = DEFAULT_CACHE_DIR

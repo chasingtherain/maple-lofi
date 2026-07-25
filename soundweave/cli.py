@@ -305,6 +305,12 @@ Examples:
   # Abort on the first unavailable/failed URL instead of skipping it
   soundweave mashup --urls urls.txt --output output --strict
 
+  # Single static image for the whole video
+  soundweave mashup --urls urls.txt --output output --image cover.png
+
+  # One image per track, held for that track's actual duration
+  soundweave mashup --urls urls.txt --output output --images covers/
+
 urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
 (same convention as order.txt).
         """
@@ -350,6 +356,25 @@ urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
         help="Directory for cached yt-dlp downloads, keyed by video ID (default: .cache/youtube)"
     )
 
+    image_group = parser.add_mutually_exclusive_group()
+    image_group.add_argument(
+        "--image",
+        type=Path,
+        default=None,
+        dest="image",
+        help="Single static image for video (omit to skip video rendering)"
+    )
+    image_group.add_argument(
+        "--images",
+        type=Path,
+        default=None,
+        dest="images_dir",
+        help=(
+            "Directory of per-track images (one per track, natural-sorted by "
+            "filename); each is shown for its track's actual duration"
+        )
+    )
+
     return parser.parse_args(argv)
 
 
@@ -369,8 +394,17 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     from soundweave.mashup_config import MashupConfig
     from soundweave.stages.download import download_stage
     from soundweave.stages.merge import merge_stage
+    from soundweave.stages.video import (
+        match_images_to_tracks,
+        video_sequence_stage,
+        video_stage,
+    )
+    from soundweave.utils.natural_sort import natural_sort
+    from soundweave.utils.validators import validate_asset_path
     from soundweave.utils.youtube import write_youtube_description
     from soundweave.ytdlp.executor import YtDlpError
+
+    _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 
     try:
         args = parse_mashup_args(argv)
@@ -381,7 +415,13 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             shuffle=args.shuffle,
             strict=args.strict,
             cache_dir=args.cache_dir,
+            static_image=args.image,
+            images_dir=args.images_dir,
         )
+
+        validate_asset_path(config.static_image, "Static image")
+        if config.images_dir is not None and not config.images_dir.is_dir():
+            raise ValidationError(f"--images directory not found: {config.images_dir}")
 
         logger = setup_logger(config.output_dir / "mashup_log.txt")
 
@@ -419,11 +459,13 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
 
         logger.info("Measuring actual track durations (post-loudnorm)...")
         actual_timestamps = [0.0]
+        actual_durations = []  # per-track, in order — used for --images sequencing
         current_time = 0.0
 
         for i, track in enumerate(tracks):
             try:
                 actual_duration = probe_loudnorm_duration(track.path)
+                actual_durations.append(actual_duration)
                 diff = actual_duration - track.duration_s
                 logger.info(
                     f"  [{i + 1}] {track.filename}: "
@@ -434,6 +476,7 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
                     current_time += actual_duration - crossfade_s
                     actual_timestamps.append(current_time)
             except Exception as e:
+                actual_durations.append(track.duration_s)
                 logger.warning(f"  Failed to measure {track.filename}: {e}")
                 if i < len(tracks) - 1:
                     current_time += track.duration_s - crossfade_s
@@ -450,12 +493,31 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             ),
         )
         logger.info(f"  {description_path.name}")
+        logger.info("")
+
+        # Stage 4: Video (optional) — static image or per-track image sequence
+        final_video = None
+        if config.images_dir is not None:
+            images = natural_sort([
+                p.name for p in config.images_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in _IMAGE_EXTENSIONS
+            ])
+            image_paths = [config.images_dir / name for name in images]
+            image_sequence = match_images_to_tracks(image_paths, actual_durations)
+            final_video = video_sequence_stage(merged_clean, image_sequence, config.output_dir, logger)
+        elif config.static_image is not None:
+            final_video = video_stage(merged_clean, config, logger)
+        else:
+            logger.info("=== Stage 4: Video Rendering ===")
+            logger.info("No --image/--images specified, skipping video rendering")
 
         logger.info("")
         logger.info("=" * 60)
         logger.info("Mashup completed successfully!")
         logger.info(f"Output:      {merged_mp3}")
         logger.info(f"Description: {description_path}")
+        if final_video:
+            logger.info(f"Video:       {final_video}")
         logger.info("=" * 60)
 
         return 0

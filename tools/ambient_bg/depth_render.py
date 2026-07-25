@@ -187,16 +187,23 @@ def parse_args() -> argparse.Namespace:
                               "(only makes sense once you've already inspected it once).")
     parser.add_argument("--preset", choices=["orbit", "circle", "horizontal", "vertical"], default="orbit",
                          help="Camera motion preset (default: orbit - slow drift-orbit per TASK.md spec).")
-    parser.add_argument("--motion-intensity", type=float, default=0.10,
+    parser.add_argument("--motion-intensity", type=float, default=0.40,
                          help="Camera motion amplitude as a fraction of DepthFlow's own example-preset "
-                              "amplitudes (default: 0.10 = 10%%, within the spec's 5-15%% range).")
-    parser.add_argument("--depth-intensity", type=float, default=0.15,
-                         help="Depth-map displacement strength (DepthState.height; default 0.2 upstream, "
-                              "we default a bit lower at 0.15 for a gentler 2.5D effect).")
-    parser.add_argument("--zoom-crop", type=float, default=0.90,
+                              "amplitudes (default: 0.40. Originally defaulted to 0.10 (10%%), within "
+                              "the spec's original 5-15%% 'gentle' range, but real-world feedback was "
+                              "that this was too subtle to notice at all - raised ~4x. Verified: mean "
+                              "pixel diff between frames a quarter-cycle apart went from 3.0/255 to "
+                              "12.5/255.")
+    parser.add_argument("--depth-intensity", type=float, default=0.35,
+                         help="Depth-map displacement strength (DepthState.height; default 0.2 upstream). "
+                              "Raised from an original 0.15 default alongside motion-intensity - same "
+                              "too-subtle feedback.")
+    parser.add_argument("--zoom-crop", type=float, default=0.75,
                          help="Camera zoom/crop factor (<1.0 crops in) to keep parallax-revealed image "
                               "edges out of frame. Lower = more margin, needed more on low-res sources "
-                              "or with higher motion-intensity. Default 0.90.")
+                              "or with higher motion-intensity. Lowered from 0.90 to 0.75 to accommodate "
+                              "the stronger motion-intensity above without revealing a black edge seam "
+                              "(verified: 0.0%% near-black border pixels at these settings).")
     parser.add_argument("--model", choices=["small", "base", "large", "giant"], default="small",
                          help="DepthAnything V2 model size (default: small - fast, good enough for a "
                               "gentle low-intensity effect; larger models are slower with diminishing "

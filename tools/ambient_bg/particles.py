@@ -58,7 +58,8 @@ def make_gaussian_sprite(radius: float) -> np.ndarray:
 
 
 class Particle:
-    def __init__(self, rng: np.random.Generator, width: int, height: int, max_opacity: float):
+    def __init__(self, rng: np.random.Generator, width: int, height: int, max_opacity: float,
+                 radius_min: float = 1.5, radius_max: float = 5.0):
         self.x0 = rng.uniform(0, width)
         # Sway amplitude in pixels - gentle, small relative to frame width.
         self.sway_amp = rng.uniform(8, 28)
@@ -77,7 +78,7 @@ class Particle:
         self.k = int(rng.integers(1, 4))
         self.phase0 = rng.uniform(0, 1)
 
-        self.radius = rng.uniform(1.5, 5.0)
+        self.radius = rng.uniform(radius_min, radius_max)
         self.base_opacity = rng.uniform(0.25, 1.0) * max_opacity
         self.twinkle_cycles = int(rng.integers(1, 3))
         self.twinkle_phase = rng.uniform(0, 2 * np.pi)
@@ -131,7 +132,7 @@ def splat(canvas: np.ndarray, x: float, y: float, opacity: float, sprite: np.nda
 def render_particles(args: argparse.Namespace) -> Path:
     rng = np.random.default_rng(args.seed)
     particles = [
-        Particle(rng, args.width, args.height, args.max_opacity)
+        Particle(rng, args.width, args.height, args.max_opacity, args.radius_min, args.radius_max)
         for _ in range(args.count)
     ]
 
@@ -191,15 +192,25 @@ def render_particles(args: argparse.Namespace) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--count", type=int, default=90, help="Number of particles (default: 90, low density).")
+    parser.add_argument("--count", type=int, default=200,
+                         help="Number of particles (default: 200. Originally defaulted to 90/low density, "
+                              "but real-world feedback was the layer was invisible in practice - raised "
+                              "alongside radius/opacity below.")
     parser.add_argument("--duration", type=float, default=20.0, help="Loop duration in seconds (must match depth_render.py's --duration to composite cleanly).")
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
-    parser.add_argument("--max-opacity", type=float, default=0.55,
+    parser.add_argument("--radius-min", type=float, default=5.0,
+                         help="Minimum particle radius in pixels (default: 5.0, raised from 1.5 - the "
+                              "original size was too small to read as anything at 1920x1080).")
+    parser.add_argument("--radius-max", type=float, default=14.0,
+                         help="Maximum particle radius in pixels (default: 14.0, raised from 5.0).")
+    parser.add_argument("--max-opacity", type=float, default=0.9,
                          help="Per-particle peak alpha (0-1). The overall layer is dimmed further "
-                              "at composite time (~20-30%% per TASK.md) - this controls the "
-                              "particles.mov layer's own internal contrast, not final on-screen strength.")
+                              "at composite time (~50-55%% now, see composite.sh - raised from the "
+                              "original ~20-30%% guidance after 'too subtle' feedback) - this controls "
+                              "the particles.mov layer's own internal contrast, not final on-screen "
+                              "strength. Raised from an original default of 0.55.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 

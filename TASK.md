@@ -68,3 +68,23 @@ Edge cases already implied by existing docstrings: `order.txt` duplicates/commen
 ## Tier 2 — integration (solo, after T2 and T3 both merge)
 
 Wire T3's `--images` flag into T2's mashup subcommand in `cli.py` — the one deliberate point of contact between the two tasks, a few lines, done once both sides exist.
+
+---
+
+## Tier 3 — future work (not started)
+
+### T4: Ready-to-upload polish — on-video track cards + branded thumbnail
+
+**Status**: not started. Scoped 2026-07-25 after a real mashup run exposed the gap — the output video plays fine but doesn't look "finished": the thumbnail is a raw, unedited copy of the background image, and the tracklist only exists as a side text file (`youtube_description.txt`) a viewer never sees unless they check the description.
+
+**Owns**: `soundweave/stages/video.py` (additive), `soundweave/ffmpeg/commands.py` (additive — new `drawtext`-based command builder(s)), `soundweave/cli.py` (additive — wire into the `mashup` subcommand).
+
+**Scope**:
+1. **On-video "Now Playing" track cards**: burn the track title into the video at each track's actual start timestamp (reuse the same per-track timestamp data that already drives `youtube_description.txt` — do not recompute), fading in/out over ~4-5s via ffmpeg's `drawtext` filter (one `enable='between(t,start,start+5)'` clause per track). Requires: a font available at render time, and correct escaping of special characters (quotes/colons) in track titles passed to `drawtext`.
+2. **Branded thumbnail**: replace the current "copy the source image as-is" thumbnail with one showing what's actually in the video (e.g. "N-Song Mashup" + track names) composited over the background image, sized/contrasted for readability at YouTube's small thumbnail display size.
+
+**Open implementation decision, make deliberately before starting**: thumbnail text compositing via ffmpeg `drawtext` on a single rendered frame (stays stdlib+ffmpeg-only, but fiddly multi-line layout) vs. pulling in Pillow (much easier text wrapping/sizing, but a new Python dependency — a real departure from this project's current stdlib-only rule per `CLAUDE.md`). Don't default into Pillow without deciding this on purpose.
+
+**Explicitly out of scope**: automating the actual YouTube upload via the Data API (OAuth, quota, metadata push). Bigger feature (external auth, credential storage) — track as a separate future task, not bundled here.
+
+**Acceptance**: a mashup run produces a video with visible, correctly-timed track-title overlays matching `youtube_description.txt`'s timestamps, and a thumbnail that's legibly different from the raw background image and shows the tracklist. Existing single-image/per-track-image video modes (`video_stage()`/`video_sequence_stage()`) unchanged in behavior when this feature is off.

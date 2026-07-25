@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Soundweave is a local CLI that turns a folder of audio files into a single crossfaded, loudness-normalized longplay, with an optional static-image YouTube video and auto-generated chapter timestamps. There's also a `loop` subcommand that repeats one file N times with silence gaps (for 1-hour loop videos). No cloud services, no GUI — Python orchestrates, FFmpeg does all audio/video processing via subprocess.
+Soundweave is a local CLI that turns a folder of audio files into a single crossfaded, loudness-normalized longplay, with an optional static-image YouTube video and auto-generated chapter timestamps. There's also a `loop` subcommand that repeats one file N times with silence gaps (for 1-hour loop videos). No cloud services — Python orchestrates, FFmpeg does all audio/video processing via subprocess.
+
+The one accepted exception to "CLI-only, no GUI": the `mashup-ui` subcommand (`soundweave/ui/`) is a local, stdlib-only browser front-end for `mashup` — bound to `127.0.0.1` only, no new dependency. It doesn't reimplement pipeline logic; submitting the form shells out to `python -m soundweave mashup ...` as a subprocess (the same command you'd type by hand) and streams its log back. Treat this as the established pattern if another subcommand ever wants a browser front-end — a thin process-launching wrapper, not a second pipeline implementation.
 
 A YouTube-sourced "mashup" mode (download audio from a list of URLs instead of reading a local folder) is planned — see `PRD.md` before touching anything related to that.
 
@@ -19,6 +21,9 @@ python3 -m soundweave --input input --output output --image cover.png
 
 # Run the loop subcommand
 python3 -m soundweave loop mysong.mp3 --count 5
+
+# Local browser front-end for the mashup subcommand
+python3 -m soundweave mashup-ui
 
 # Tests (none exist yet beyond tests/__init__.py — the scaffolding is there but empty)
 .venv/bin/pytest tests/

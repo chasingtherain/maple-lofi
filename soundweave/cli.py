@@ -320,6 +320,13 @@ Examples:
   # downloading any audio or running the rest of the pipeline
   soundweave mashup --urls urls.txt --output output --dry-run
 
+  # Burn "now playing" track-title cards into the video at each track's
+  # actual start (works with either --image or --images)
+  soundweave mashup --urls urls.txt --output output --image cover.png --track-cards
+
+  # Same, with an explicit font instead of the auto-detected system default
+  soundweave mashup --urls urls.txt --output output --image cover.png --track-cards --font /path/to/font.ttf
+
 urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
 (same convention as order.txt).
         """
@@ -405,6 +412,29 @@ urls.txt format: one YouTube URL per line, '#' comments, blank lines ignored
         )
     )
 
+    parser.add_argument(
+        "--track-cards",
+        action="store_true",
+        dest="track_cards",
+        help=(
+            "Burn each track's title into the video at its actual start "
+            "timestamp, fading in/out (T1 'now playing' cards). Overlays "
+            "onto --image/--images unchanged; off by default. No effect "
+            "if neither --image nor --images is given."
+        )
+    )
+    parser.add_argument(
+        "--font",
+        type=Path,
+        default=None,
+        dest="font",
+        help=(
+            "Font file (.ttf/.ttc/.otf) for --track-cards text. Defaults to "
+            "searching common macOS system font locations (e.g. Arial.ttf); "
+            "only used when --track-cards is passed."
+        )
+    )
+
     return parser.parse_args(argv)
 
 
@@ -434,7 +464,11 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
     )
     from soundweave.utils.natural_sort import natural_sort
     from soundweave.utils.validators import validate_asset_path
-    from soundweave.utils.youtube import format_timestamp, write_youtube_description
+    from soundweave.utils.youtube import (
+        clean_track_name,
+        format_timestamp,
+        write_youtube_description,
+    )
     from soundweave.ytdlp.executor import YtDlpError
 
     _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -579,8 +613,30 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
         logger.info(f"  {description_path.name}")
         logger.info("")
 
+        # T1 "now playing" track-title cards: same per-track timing data
+        # that already drives youtube_description.txt above, reused as-is
+        # rather than recomputed (same defensive length check too — if
+        # per-track probing above ever desynced the two lists, skip the
+        # overlay with a warning instead of pairing mismatched data).
+        track_cards = None
+        if args.track_cards:
+            if len(actual_timestamps) == len(tracks):
+                track_cards = [
+                    (clean_track_name(track.filename), start_s)
+                    for track, start_s in zip(tracks, actual_timestamps)
+                ]
+            else:
+                logger.warning(
+                    "--track-cards requested but timestamp count "
+                    f"({len(actual_timestamps)}) doesn't match track count "
+                    f"({len(tracks)}) — skipping track-card overlay"
+                )
+
         # Stage 4: Video (optional) — static image, per-track image sequence,
-        # or looping animated background
+        # or looping animated background. Track cards (--track-cards) are an
+        # overlay on the first two modes only -- animated_background_video_stage()
+        # doesn't take track_cards/font_path (T1 was scoped before
+        # --animated-background existed; not extended to it here either).
         final_video = None
         if config.images_dir is not None:
             images = natural_sort([
@@ -589,9 +645,18 @@ def _run_mashup_subcommand(argv: list[str]) -> int:
             ])
             image_paths = [config.images_dir / name for name in images]
             image_sequence = match_images_to_tracks(image_paths, actual_durations)
-            final_video = video_sequence_stage(merged_clean, image_sequence, config.output_dir, logger)
+            final_video = video_sequence_stage(
+                merged_clean,
+                image_sequence,
+                config.output_dir,
+                logger,
+                track_cards=track_cards,
+                font_path=args.font,
+            )
         elif config.static_image is not None:
-            final_video = video_stage(merged_clean, config, logger)
+            final_video = video_stage(
+                merged_clean, config, logger, track_cards=track_cards, font_path=args.font
+            )
         elif config.animated_background is not None:
             final_video = animated_background_video_stage(
                 merged_clean, config.animated_background, config.output_dir, logger

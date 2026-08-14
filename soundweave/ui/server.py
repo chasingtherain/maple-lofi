@@ -29,17 +29,30 @@ from email.parser import BytesParser
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 from uuid import uuid4
 
 from soundweave.loop_config import AUDIO_EXTENSIONS as _AUDIO_EXTENSIONS
 from soundweave.loop_config import DEFAULT_GAP_MS, DEFAULT_TRIM_DB
 from soundweave.mashup_config import DEFAULT_FADE_MS
+from soundweave.ui.progress import infer_phase
 from soundweave.ui.templates import INDEX_HTML, JOB_HTML, LOOP_HTML
 
 _LOG_TAIL_BYTES = 60_000
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 _JOB_ID_TZ = timezone(timedelta(hours=8))  # GMT+8, for human-readable job-id timestamps
+
+# Files that are inputs to a job (uploaded/generated before the subprocess
+# ran) or internal bookkeeping, not a result worth a download card. Matched
+# by exact name or prefix -- new stems here should be added if start_job()/
+# start_loop_job() ever write a new kind of input file.
+_NON_OUTPUT_NAMES = {"urls.txt", "process.log", "manifest.json"}
+_NON_OUTPUT_PREFIXES = ("cover.", "input.", "animated_background.")
+_NON_OUTPUT_SUFFIXES = ("_log.txt",)
+# youtube_description.txt gets its own dedicated card (with a copy button,
+# see JOB_HTML) via description_text below -- excluded here so it doesn't
+# also show up as a redundant generic download card.
+_DESCRIPTION_FILENAME = "youtube_description.txt"
 
 
 def _parse_multipart(content_type: str, body: bytes) -> dict[str, list[Message]]:
@@ -82,8 +95,39 @@ class _Job:
         self.final_log: bytes | None = None
         self.removed = False
 
+    def _list_outputs(self) -> list[dict]:
+        if self.removed or not self.job_dir.is_dir():
+            return []
+        outputs = []
+        for path in sorted(self.job_dir.iterdir()):
+            if not path.is_file():
+                continue
+            name = path.name
+            if name in _NON_OUTPUT_NAMES or name == _DESCRIPTION_FILENAME:
+                continue
+            if name.startswith(_NON_OUTPUT_PREFIXES) or name.endswith(_NON_OUTPUT_SUFFIXES):
+                continue
+            outputs.append(
+                {
+                    "name": name,
+                    "path": f"/download/{self.job_id}/{quote(name)}",
+                    "size_mb": round(path.stat().st_size / (1024 * 1024), 2),
+                }
+            )
+        return outputs
+
+    def _description_text(self) -> str | None:
+        if self.removed:
+            return None
+        desc_path = self.job_dir / _DESCRIPTION_FILENAME
+        try:
+            return desc_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+
     def status(self) -> dict:
         returncode = self.process.poll()
+        running = returncode is None
         if self.final_log is not None:
             data = self.final_log
         else:
@@ -91,10 +135,14 @@ class _Job:
                 data = self.log_path.read_bytes()[-_LOG_TAIL_BYTES:]
             except FileNotFoundError:
                 data = b""
+        log_text = data.decode("utf-8", errors="replace")
         return {
-            "running": returncode is None,
+            "phase": infer_phase(log_text, running, returncode),
+            "log": log_text,
+            "running": running,
             "returncode": returncode,
-            "log": data.decode("utf-8", errors="replace"),
+            "outputs": self._list_outputs(),
+            "description_text": self._description_text(),
             "output_dir": None if self.removed else str(self.job_dir),
         }
 
@@ -374,8 +422,36 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 return
             self._send(json.dumps(job.status()).encode("utf-8"), content_type="application/json")
+        elif parsed.path.startswith("/download/"):
+            self._handle_download(parsed.path[len("/download/") :])
         else:
             self._send(b"<h1>Not found</h1>", status=404)
+
+    def _handle_download(self, raw_path: str) -> None:
+        # raw_path is "<job_id>/<filename>" -- split on the first "/" only,
+        # since filenames themselves never contain one (outputs are always
+        # direct children of job_dir, see _list_outputs).
+        job_id, _, filename = raw_path.partition("/")
+        job = self.server.jobs.get(job_id)
+        if job is None or not filename:
+            self._send(b"<h1>Not found</h1>", status=404)
+            return
+        # Re-derive the allowed filename set from the job's own output
+        # listing rather than trusting the URL directly -- closes off path
+        # traversal (a filename like "../../etc/passwd" simply won't appear
+        # in _list_outputs) without needing to hand-roll path validation.
+        safe_name = unquote(filename)
+        match = next((o for o in job._list_outputs() if o["name"] == safe_name), None)
+        if match is None:
+            self._send(b"<h1>Not found</h1>", status=404)
+            return
+        file_path = job.job_dir / safe_name
+        try:
+            body = file_path.read_bytes()
+        except OSError:
+            self._send(b"<h1>Not found</h1>", status=404)
+            return
+        self._send(body, content_type="application/octet-stream")
 
     def do_POST(self) -> None:
         if self.path == "/run":

@@ -457,7 +457,6 @@ container = client.containers.run(**config)
 
 ## Related Decisions
 
-- [ADR 001: Pipeline Architecture](001-pipeline-architecture.md) - Stages call FFmpeg module
 - [ADR 004: Error Handling Strategy](004-error-handling.md) - ProcessingError raised by executor
 
 ## References

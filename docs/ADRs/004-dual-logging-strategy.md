@@ -561,7 +561,6 @@ Run npm test
 
 ## Related Decisions
 
-- [ADR 001: Pipeline Architecture](001-pipeline-architecture.md) - Pipeline builds both log and manifest
 - [ADR 003: FFmpeg Abstraction](003-ffmpeg-abstraction.md) - run_ffmpeg logs commands
 
 ## References

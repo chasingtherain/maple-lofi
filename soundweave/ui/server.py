@@ -36,7 +36,7 @@ from soundweave.loop_config import AUDIO_EXTENSIONS as _AUDIO_EXTENSIONS
 from soundweave.loop_config import DEFAULT_GAP_MS, DEFAULT_TRIM_DB
 from soundweave.mashup_config import DEFAULT_FADE_MS
 from soundweave.ui.progress import infer_phase
-from soundweave.ui.templates import INDEX_HTML, JOB_HTML, LOOP_HTML
+from soundweave.ui.templates import HISTORY_HTML, INDEX_HTML, JOB_HTML
 
 _LOG_TAIL_BYTES = 60_000
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -83,6 +83,36 @@ def _field_text(fields: dict[str, list[Message]], name: str, default: str = "") 
     return payload.decode("utf-8", errors="replace")
 
 
+def _list_output_files(job_id: str, job_dir: Path) -> list[dict]:
+    """List a job's real output files on disk, filtering out inputs/internals.
+
+    Module-level (not a _Job method) so it works identically for a live job
+    (in self.server.jobs, has a running/finished subprocess) and a purely
+    historical one (a directory left on disk from a previous server
+    process -- no in-memory Job object at all, since job state doesn't
+    survive a server restart, only the files on disk do).
+    """
+    if not job_dir.is_dir():
+        return []
+    outputs = []
+    for path in sorted(job_dir.iterdir()):
+        if not path.is_file():
+            continue
+        name = path.name
+        if name in _NON_OUTPUT_NAMES or name == _DESCRIPTION_FILENAME:
+            continue
+        if name.startswith(_NON_OUTPUT_PREFIXES) or name.endswith(_NON_OUTPUT_SUFFIXES):
+            continue
+        outputs.append(
+            {
+                "name": name,
+                "path": f"/download/{job_id}/{quote(name)}",
+                "size_mb": round(path.stat().st_size / (1024 * 1024), 2),
+            }
+        )
+    return outputs
+
+
 class _Job:
     def __init__(self, job_id: str, job_dir: Path, process: subprocess.Popen, log_path: Path):
         self.job_id = job_id
@@ -96,25 +126,9 @@ class _Job:
         self.removed = False
 
     def _list_outputs(self) -> list[dict]:
-        if self.removed or not self.job_dir.is_dir():
+        if self.removed:
             return []
-        outputs = []
-        for path in sorted(self.job_dir.iterdir()):
-            if not path.is_file():
-                continue
-            name = path.name
-            if name in _NON_OUTPUT_NAMES or name == _DESCRIPTION_FILENAME:
-                continue
-            if name.startswith(_NON_OUTPUT_PREFIXES) or name.endswith(_NON_OUTPUT_SUFFIXES):
-                continue
-            outputs.append(
-                {
-                    "name": name,
-                    "path": f"/download/{self.job_id}/{quote(name)}",
-                    "size_mb": round(path.stat().st_size / (1024 * 1024), 2),
-                }
-            )
-        return outputs
+        return _list_output_files(self.job_id, self.job_dir)
 
     def _description_text(self) -> str | None:
         if self.removed:
@@ -403,7 +417,15 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._send(INDEX_HTML.encode("utf-8"))
         elif parsed.path == "/loop":
-            self._send(LOOP_HTML.encode("utf-8"))
+            # Loop is now a mode within the unified page (see
+            # PRD_LAUNCH.md Sec 5, "merge Loop into Mashup") rather than a
+            # separate page -- redirect old bookmarks/links instead of
+            # silently 404ing them.
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+        elif parsed.path == "/history":
+            self._send(self._render_history().encode("utf-8"))
         elif parsed.path.startswith("/job/"):
             job_id = parsed.path[len("/job/") :]
             if job_id not in self.server.jobs:
@@ -430,28 +452,78 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle_download(self, raw_path: str) -> None:
         # raw_path is "<job_id>/<filename>" -- split on the first "/" only,
         # since filenames themselves never contain one (outputs are always
-        # direct children of job_dir, see _list_outputs).
+        # direct children of job_dir, see _list_output_files).
         job_id, _, filename = raw_path.partition("/")
-        job = self.server.jobs.get(job_id)
-        if job is None or not filename:
+        if not job_id or not filename:
             self._send(b"<h1>Not found</h1>", status=404)
             return
-        # Re-derive the allowed filename set from the job's own output
-        # listing rather than trusting the URL directly -- closes off path
+
+        # A live job (this server process's in-memory dict) takes priority;
+        # otherwise fall back to reading straight off disk under
+        # output_base, so history entries from a *previous* server run
+        # (job state doesn't survive a restart, only the files do) can
+        # still be downloaded, not just jobs from the current session.
+        job = self.server.jobs.get(job_id)
+        if job is not None:
+            job_dir = job.job_dir if not job.removed else None
+        else:
+            candidate = self.server.output_base / job_id
+            job_dir = candidate if candidate.is_dir() else None
+        if job_dir is None:
+            self._send(b"<h1>Not found</h1>", status=404)
+            return
+
+        # Re-derive the allowed filename set from the real output listing
+        # rather than trusting the URL directly -- closes off path
         # traversal (a filename like "../../etc/passwd" simply won't appear
-        # in _list_outputs) without needing to hand-roll path validation.
+        # in _list_output_files) without hand-rolling path validation.
         safe_name = unquote(filename)
-        match = next((o for o in job._list_outputs() if o["name"] == safe_name), None)
+        outputs = _list_output_files(job_id, job_dir)
+        match = next((o for o in outputs if o["name"] == safe_name), None)
         if match is None:
             self._send(b"<h1>Not found</h1>", status=404)
             return
-        file_path = job.job_dir / safe_name
         try:
-            body = file_path.read_bytes()
+            body = (job_dir / safe_name).read_bytes()
         except OSError:
             self._send(b"<h1>Not found</h1>", status=404)
             return
         self._send(body, content_type="application/octet-stream")
+
+    def _render_history(self) -> str:
+        # Reads output_base directly off disk (job_id is a sortable
+        # timestamp prefix, see _new_job_dir) rather than the in-memory
+        # jobs dict, so this survives server restarts -- "history", not
+        # just "this session's jobs". No database: the filesystem already
+        # is the record.
+        output_base = self.server.output_base
+        if not output_base.is_dir():
+            job_dirs: list[Path] = []
+        else:
+            job_dirs = sorted(
+                (p for p in output_base.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True
+            )
+
+        if not job_dirs:
+            items_html = '<p class="hint">No runs yet.</p>'
+        else:
+            rows = []
+            for job_dir in job_dirs:
+                outputs = _list_output_files(job_dir.name, job_dir)
+                if outputs:
+                    links = " · ".join(
+                        f'<a class="dl-btn" href="{o["path"]}" download>{escape(o["name"])}</a>'
+                        for o in outputs
+                    )
+                else:
+                    links = '<span class="hint">no output files (job failed or still running)</span>'
+                rows.append(
+                    f'<div class="history-item"><span class="output-name">{escape(job_dir.name)}</span>'
+                    f"<span>{links}</span></div>"
+                )
+            items_html = "\n".join(rows)
+
+        return HISTORY_HTML.replace("__HISTORY_ITEMS__", items_html)
 
     def do_POST(self) -> None:
         if self.path == "/run":

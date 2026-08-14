@@ -125,6 +125,34 @@ pre.log {
 .history-item { display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--border); }
 .history-item:first-of-type { border-top: none; }
 .history-item a { color: var(--accent-text); }
+.url-row-wrap { margin-top: 8px; }
+.url-row-wrap:first-child { margin-top: 0; }
+.url-row-wrap.dragging { opacity: 0.4; }
+.url-row { display: flex; align-items: center; gap: 8px; }
+.drag-handle { cursor: grab; color: var(--text-dim); font-size: 15px; user-select: none; padding: 4px; letter-spacing: -2px; }
+.url-row input[type=text] { margin-top: 0; flex: 1; }
+.remove-row-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 16px; line-height: 1;
+  flex-shrink: 0;
+}
+.remove-row-btn:hover { border-color: var(--error); color: var(--error-text); }
+.add-row-btn {
+  margin-top: 10px; background: none; border: 1px dashed var(--border); color: var(--text-dim);
+  border-radius: 6px; padding: 8px 12px; font-size: 13px; cursor: pointer; width: 100%;
+}
+.add-row-btn:hover { border-color: var(--accent); color: var(--accent-text); }
+.urls-error { color: var(--error-text); }
+.url-preview {
+  display: none; align-items: center; gap: 10px; margin: 6px 0 0 30px;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+}
+.url-preview img { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.url-preview-title {
+  font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.url-preview.error .url-preview-title { color: var(--text-dim); font-style: italic; }
 """
 
 INDEX_HTML = (
@@ -148,11 +176,15 @@ INDEX_HTML = (
 </div>
 
 <div id="panel-mashup">
-<p class="hint">Paste YouTube URLs (one per line), crossfade them into one track, and optionally add video.</p>
+<p class="hint">Add YouTube links, crossfade them into one track, and optionally add video.</p>
 <form method="post" action="/run" enctype="multipart/form-data">
   <div class="card">
-    <label for="urls">YouTube URLs</label>
-    <textarea id="urls" name="urls" placeholder="https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=...&#10;# comments and blank lines are fine" required></textarea>
+    <label>YouTube URLs</label>
+    <p class="hint">Add one link per song. Drag the handle to reorder -- that's the order they'll be crossfaded in.</p>
+    <div id="url-rows"></div>
+    <button type="button" class="add-row-btn" id="add-url-row">+ Add another link</button>
+    <p class="hint urls-error" id="urls-error" style="display:none">Add at least one YouTube link before running.</p>
+    <textarea name="urls" id="urls-hidden" style="display:none"></textarea>
   </div>
 
   <div class="card">
@@ -263,6 +295,149 @@ for (const radio of document.querySelectorAll('input[name="video_mode"]')) {
     if (imagesMode) loopCountInput.value = "";
   });
 }
+
+// YouTube URL rows: add/remove/drag-reorder, paste-splitting, sync into
+// the hidden "urls" textarea (newline-separated, same format the server
+// has always expected) right before the form submits.
+const urlRows = document.getElementById("url-rows");
+const addUrlRowBtn = document.getElementById("add-url-row");
+const urlsHidden = document.getElementById("urls-hidden");
+const urlsError = document.getElementById("urls-error");
+
+// Per-row title/thumbnail preview via YouTube's public oEmbed endpoint
+// (no API key, CORS-enabled) -- this is the one request in the app that
+// leaves 127.0.0.1, purely to fetch a video's title/thumbnail for display.
+function looksLikeYouTubeUrl(value) {
+  return /youtube\\.com\\/|youtu\\.be\\//i.test(value);
+}
+
+function renderPreview(previewEl, state, data) {
+  previewEl.classList.toggle("error", state === "error");
+  previewEl.innerHTML = "";
+  if (state === "hidden") {
+    previewEl.style.display = "none";
+    return;
+  }
+  previewEl.style.display = "flex";
+  if (state === "ok") {
+    const img = document.createElement("img");
+    img.src = data.thumbnail_url;
+    img.alt = "";
+    const title = document.createElement("span");
+    title.className = "url-preview-title";
+    title.textContent = data.title;
+    previewEl.append(img, title);
+  } else {
+    const title = document.createElement("span");
+    title.className = "url-preview-title";
+    title.textContent = state === "loading" ? "Loading preview..." : "Couldn't load a preview for this link";
+    previewEl.appendChild(title);
+  }
+}
+
+function fetchPreview(input, previewEl) {
+  const url = input.value.trim();
+  if (input._previewAbort) input._previewAbort.abort();
+  if (!url || !looksLikeYouTubeUrl(url)) {
+    renderPreview(previewEl, "hidden");
+    return;
+  }
+  const controller = new AbortController();
+  input._previewAbort = controller;
+  renderPreview(previewEl, "loading");
+  const oembedUrl = "https://www.youtube.com/oembed?url=" + encodeURIComponent(url) + "&format=json";
+  fetch(oembedUrl, { signal: controller.signal })
+    .then((res) => {
+      if (!res.ok) throw new Error("oEmbed request failed");
+      return res.json();
+    })
+    .then((data) => renderPreview(previewEl, "ok", data))
+    .catch((err) => {
+      if (err.name === "AbortError") return;
+      renderPreview(previewEl, "error");
+    });
+}
+
+function makeUrlRow(value) {
+  const wrap = document.createElement("div");
+  wrap.className = "url-row-wrap";
+  wrap.innerHTML = `<div class="url-row">
+      <span class="drag-handle" title="Drag to reorder">::::</span>
+      <input type="text" class="url-input" placeholder="https://youtube.com/watch?v=...">
+      <button type="button" class="remove-row-btn" title="Remove">&times;</button>
+    </div>
+    <div class="url-preview"></div>`;
+  const input = wrap.querySelector(".url-input");
+  const previewEl = wrap.querySelector(".url-preview");
+  input.value = value || "";
+  const handle = wrap.querySelector(".drag-handle");
+  handle.draggable = true;
+
+  let debounceTimer;
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => fetchPreview(input, previewEl), 700);
+  });
+  input.addEventListener("paste", (e) => {
+    const text = e.clipboardData.getData("text");
+    if (!text.includes("\\n")) return;
+    e.preventDefault();
+    const lines = text.split("\\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+    input.value = lines[0];
+    fetchPreview(input, previewEl);
+    let after = wrap;
+    for (const line of lines.slice(1)) {
+      const newRow = makeUrlRow(line);
+      after.after(newRow);
+      after = newRow;
+    }
+  });
+
+  wrap.querySelector(".remove-row-btn").addEventListener("click", () => {
+    if (input._previewAbort) input._previewAbort.abort();
+    wrap.remove();
+    if (!urlRows.querySelector(".url-row-wrap")) urlRows.appendChild(makeUrlRow(""));
+  });
+
+  handle.addEventListener("dragstart", (e) => {
+    wrap.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setDragImage(wrap, 10, 10);
+  });
+  handle.addEventListener("dragend", () => wrap.classList.remove("dragging"));
+
+  return wrap;
+}
+
+urlRows.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  const dragging = urlRows.querySelector(".dragging");
+  if (!dragging) return;
+  const after = [...urlRows.querySelectorAll(".url-row-wrap:not(.dragging)")].find((el) => {
+    const rect = el.getBoundingClientRect();
+    return e.clientY < rect.top + rect.height / 2;
+  });
+  if (after) urlRows.insertBefore(dragging, after);
+  else urlRows.appendChild(dragging);
+});
+
+addUrlRowBtn.addEventListener("click", () => urlRows.appendChild(makeUrlRow("")));
+
+urlRows.appendChild(makeUrlRow(""));
+
+document.querySelector('form[action="/run"]').addEventListener("submit", (e) => {
+  const values = [...urlRows.querySelectorAll(".url-input")]
+    .map((el) => el.value.trim())
+    .filter(Boolean);
+  if (!values.length) {
+    e.preventDefault();
+    urlsError.style.display = "";
+    return;
+  }
+  urlsError.style.display = "none";
+  urlsHidden.value = values.join("\\n");
+});
 
 // Loop source sub-toggle
 const audioInput = document.getElementById("audio");
